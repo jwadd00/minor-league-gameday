@@ -640,8 +640,15 @@ async function fetchPlayerCardBatch(playerIds: number[]) {
       if (pendingIds.length === 0) {
         return results;
       }
-    } catch {
-      // A later attempt retries only the IDs that have not been verified yet.
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "player_card_batch_failed",
+          attempt,
+          pendingPlayers: pendingIds.length,
+          message: error instanceof Error ? error.message : "Unknown error",
+        }),
+      );
     } finally {
       clearTimeout(timeout);
     }
