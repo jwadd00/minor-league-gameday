@@ -46,3 +46,33 @@ export const playerMetaCache = sqliteTable(
     index("idx_player_meta_cache_expires_at").on(table.expiresAt),
   ],
 );
+
+export const dailySnapshotState = sqliteTable("daily_snapshot_state", {
+  date: text("date").primaryKey(),
+  generation: text("generation").notNull(),
+  teamCount: integer("team_count").notNull(),
+  playerCount: integer("player_count").notNull(),
+  missingDraft: integer("missing_draft").notNull(),
+  missingSchool: integer("missing_school").notNull(),
+  builtAt: integer("built_at").notNull(),
+});
+
+export const dailyTeamSnapshot = sqliteTable(
+  "daily_team_snapshot",
+  {
+    date: text("date").notNull(),
+    generation: text("generation").notNull(),
+    teamId: integer("team_id").notNull(),
+    teamName: text("team_name").notNull(),
+    payload: text("payload").notNull(),
+    fetchedAt: integer("fetched_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.date, table.generation, table.teamId] }),
+    index("idx_daily_team_snapshot_lookup").on(
+      table.date,
+      table.generation,
+      table.teamId,
+    ),
+  ],
+);

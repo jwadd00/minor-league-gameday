@@ -1,12 +1,12 @@
 import { env } from "cloudflare:workers";
-import { getRequestExecutionContext } from "vinext/shims/request-context";
 
 export const dynamic = "force-dynamic";
 
 const API_BASE = "https://statsapi.mlb.com/api/v1";
 const MINOR_SPORT_IDS = "11,12,13,14,16";
-const CARD_TIMEOUT_MS = 8000;
-const PEOPLE_BATCH_SIZE = 75;
+const CARD_TIMEOUT_MS = 20_000;
+const PEOPLE_BATCH_SIZE = 25;
+const CARD_FETCH_ATTEMPTS = 3;
 const SCHEDULE_TTL_MS = 3 * 60 * 1000;
 const ROSTER_TTL_MS = 15 * 60 * 1000;
 const PLAYER_META_TTL_MS = 21 * 24 * 60 * 60 * 1000;
@@ -85,6 +85,21 @@ type CacheStore = {
   db?: D1Database;
 };
 
+type SnapshotState = {
+  date: string;
+  generation: string;
+  teamCount: number;
+  playerCount: number;
+  missingDraft: number;
+  missingSchool: number;
+  builtAt: number;
+};
+
+type DailySnapshot = {
+  state: SnapshotState;
+  players: Player[];
+};
+
 const cardCache = new Map<number, Promise<FetchedPlayerCard>>();
 const memorySchedule = new Map<string, CacheEntry<Game[]>>();
 const memoryRosters = new Map<string, CacheEntry<Player[]>>();
@@ -102,72 +117,29 @@ export async function GET(request: Request) {
       return Response.json({ games: await getGames(date, cache) });
     }
 
-    if (view === "game" || view === "enrichGame") {
+    if (view === "game") {
       const gamePk = Number(url.searchParams.get("gamePk"));
       if (!Number.isFinite(gamePk)) {
         return Response.json({ error: "gamePk is required." }, { status: 400 });
       }
 
-      const detail = await getGameDetail(date, gamePk, cache, view === "enrichGame");
-
-      if (view === "game" && shouldRefreshBio(detail.cacheInfo)) {
-        getRequestExecutionContext()?.waitUntil(
-          enrichGameBio(date, gamePk, cache).catch(() => undefined),
-        );
-      }
-
-      return Response.json(detail);
+      const detail = await getSnapshotGameDetail(date, gamePk, cache);
+      return detail
+        ? snapshotJson(detail)
+        : snapshotUnavailable(date);
     }
 
     if (view === "players") {
-      const games = await getGames(date, cache);
-      const teams = uniqueTeams(games);
-      const rosters = await mapLimit(teams, 8, (team) =>
-        getRoster(team, date, cache, false),
-      );
-      const players = rosters
-        .flatMap((entry) => entry.players)
-        .sort((a, b) => a.name.localeCompare(b.name));
-      const cacheInfo = summarizePlayers(players);
-
-      if (shouldRefreshBio(cacheInfo)) {
-        getRequestExecutionContext()?.waitUntil(
-          enrichPlayers(players, cache).catch(() => undefined),
-        );
+      const snapshot = await readDailySnapshot(date, cache);
+      if (!snapshot) {
+        return snapshotUnavailable(date);
       }
 
-      return Response.json({
-        players,
-        teamCount: teams.length,
-        cacheInfo,
-      });
-    }
-
-    if (view === "warm") {
-      const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
-      const limit = Math.min(
-        48,
-        Math.max(1, Number(url.searchParams.get("limitTeams")) || 12),
-      );
-      const scope = url.searchParams.get("scope") === "all" ? "all" : "fullSeason";
-      const games = await getGames(date, cache);
-      const teams = uniqueTeams(
-        scope === "all" ? games : games.filter((game) => !isComplexLeagueGame(game)),
-      );
-      const batch = teams.slice(offset, offset + limit);
-      const results = await mapLimit(batch, 4, async (team) => {
-        const roster = await getRoster(team, date, cache, false);
-        const refreshedBio = await enrichPlayers(roster.players, cache);
-        return { teamId: team.id, playerCount: roster.players.length, refreshedBio };
-      });
-
-      return Response.json({
-        date,
-        scope,
-        teams: results.length,
-        totalTeams: teams.length,
-        nextOffset: offset + results.length < teams.length ? offset + results.length : null,
-        refreshedBio: results.reduce((sum, item) => sum + item.refreshedBio, 0),
+      return snapshotJson({
+        players: snapshot.players,
+        teamCount: snapshot.state.teamCount,
+        cacheInfo: summarizePlayers(snapshot.players),
+        snapshot: snapshot.state,
       });
     }
 
@@ -176,6 +148,211 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "Unexpected error.";
     return Response.json({ error: message }, { status: 500 });
   }
+}
+
+export async function POST(request: Request) {
+  try {
+    const url = new URL(request.url);
+    if (url.searchParams.get("view") !== "materialize") {
+      return Response.json({ error: "Unknown view." }, { status: 400 });
+    }
+
+    const configuredToken = (env as unknown as { CACHE_WARM_TOKEN?: string })
+      .CACHE_WARM_TOKEN;
+    const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    if (!configuredToken || suppliedToken !== configuredToken) {
+      return Response.json({ error: "Unauthorized." }, { status: 401 });
+    }
+
+    return Response.json(
+      await materializeDailySnapshot(normalizeDate(url.searchParams.get("date"))),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected error.";
+    return Response.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function materializeDailySnapshot(date: string) {
+  const cache = await getCacheStore();
+  if (!cache.db) {
+    throw new Error("Daily snapshots require the configured database.");
+  }
+
+  const games = await getGames(date, cache, true);
+  const teams = uniqueTeams(games);
+  const generation = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+  const builtAt = Date.now();
+  const teamSnapshots = await mapLimit(teams, 8, async (team) => {
+    const basePlayers = await getBaseRoster(team, date, cache, true);
+    await enrichPlayers(basePlayers, cache);
+    const merged = await mergeCachedBio(basePlayers, cache);
+    return {
+      team,
+      players: merged.players.map(withExplicitMissingValues),
+    };
+  });
+
+  const players = teamSnapshots.flatMap((entry) => entry.players);
+  const unresolvedPlayers = players.filter(
+    (player) => player.bioStatus !== "fresh",
+  );
+  if (teams.length === 0 || players.length === 0) {
+    throw new Error("Snapshot validation failed because the schedule or rosters were empty.");
+  }
+  if (unresolvedPlayers.length > 0) {
+    throw new Error(
+      `Snapshot validation failed because ${unresolvedPlayers.length} player records were not verified.`,
+    );
+  }
+  const missingDraft = players.filter((player) => isNotListed(player.draft)).length;
+  const missingSchool = players.filter((player) => isNotListed(player.school)).length;
+
+  const writes = teamSnapshots.map((entry) =>
+    cache.db!.prepare(
+      "INSERT INTO daily_team_snapshot (date, generation, team_id, team_name, payload, fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(
+      date,
+      generation,
+      entry.team.id,
+      entry.team.shortName || entry.team.name,
+      JSON.stringify(entry.players),
+      builtAt,
+    ),
+  );
+
+  for (const batch of chunkArray(writes, 50)) {
+    await cache.db.batch(batch);
+  }
+
+  await cache.db.batch([
+    cache.db.prepare(
+      "INSERT INTO daily_snapshot_state (date, generation, team_count, player_count, missing_draft, missing_school, built_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(date) DO UPDATE SET generation = excluded.generation, team_count = excluded.team_count, player_count = excluded.player_count, missing_draft = excluded.missing_draft, missing_school = excluded.missing_school, built_at = excluded.built_at",
+    ).bind(
+      date,
+      generation,
+      teams.length,
+      players.length,
+      missingDraft,
+      missingSchool,
+      builtAt,
+    ),
+    cache.db.prepare(
+      "DELETE FROM daily_team_snapshot WHERE date = ? AND generation <> ?",
+    ).bind(date, generation),
+    cache.db.prepare(
+      "DELETE FROM daily_team_snapshot WHERE date < date(?, '-3 days')",
+    ).bind(date),
+    cache.db.prepare(
+      "DELETE FROM daily_snapshot_state WHERE date < date(?, '-3 days')",
+    ).bind(date),
+  ]);
+
+  return {
+    date,
+    generation,
+    teamCount: teams.length,
+    playerCount: players.length,
+    missingDraft,
+    missingSchool,
+    builtAt,
+  };
+}
+
+async function readDailySnapshot(
+  date: string,
+  cache: CacheStore,
+): Promise<DailySnapshot | null> {
+  if (!cache.db) {
+    return null;
+  }
+
+  const stateRow = await cache.db.prepare(
+    "SELECT date, generation, team_count, player_count, missing_draft, missing_school, built_at FROM daily_snapshot_state WHERE date = ?",
+  ).bind(date).first<{
+    date: string;
+    generation: string;
+    team_count: number;
+    player_count: number;
+    missing_draft: number;
+    missing_school: number;
+    built_at: number;
+  }>();
+
+  if (!stateRow) {
+    return null;
+  }
+
+  const rows = await cache.db.prepare(
+    "SELECT payload FROM daily_team_snapshot WHERE date = ? AND generation = ? ORDER BY team_name",
+  ).bind(date, stateRow.generation).all<{ payload: string }>();
+  const players = (rows.results ?? [])
+    .flatMap((row) => JSON.parse(row.payload) as Player[])
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (players.length !== stateRow.player_count) {
+    return null;
+  }
+
+  return {
+    state: {
+      date: stateRow.date,
+      generation: stateRow.generation,
+      teamCount: stateRow.team_count,
+      playerCount: stateRow.player_count,
+      missingDraft: stateRow.missing_draft,
+      missingSchool: stateRow.missing_school,
+      builtAt: stateRow.built_at,
+    },
+    players,
+  };
+}
+
+async function getSnapshotGameDetail(
+  date: string,
+  gamePk: number,
+  cache: CacheStore,
+) {
+  const [games, snapshot] = await Promise.all([
+    getGames(date, cache),
+    readDailySnapshot(date, cache),
+  ]);
+  const game = games.find((entry) => entry.gamePk === gamePk);
+  if (!game) {
+    throw new Error("Game was not found for that date.");
+  }
+  if (!snapshot) {
+    return null;
+  }
+
+  const teams = [game.away, game.home].map((team) => {
+    const players = snapshot.players.filter((player) => player.teamId === team.id);
+    return { team, players, cacheInfo: summarizePlayers(players) };
+  });
+  return {
+    game,
+    teams,
+    cacheInfo: summarizePlayers(teams.flatMap((entry) => entry.players)),
+    snapshot: snapshot.state,
+  };
+}
+
+function snapshotUnavailable(date: string) {
+  return Response.json(
+    {
+      error: `The complete player snapshot for ${date} is not ready yet.`,
+      code: "SNAPSHOT_NOT_READY",
+    },
+    { status: 503, headers: { "retry-after": "60" } },
+  );
+}
+
+function snapshotJson(payload: unknown) {
+  return Response.json(payload, {
+    headers: {
+      "cache-control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+    },
+  });
 }
 
 async function getGameDetail(
@@ -230,9 +407,13 @@ async function enrichGameBio(date: string, gamePk: number, cache: CacheStore) {
   await getGameDetail(date, gamePk, cache, true);
 }
 
-async function getGames(date: string, cache: CacheStore): Promise<Game[]> {
+async function getGames(
+  date: string,
+  cache: CacheStore,
+  forceRefresh = false,
+): Promise<Game[]> {
   const cached = await readScheduleCache(date, cache);
-  if (cached && cached.expiresAt > Date.now()) {
+  if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
     return cached.payload;
   }
 
@@ -364,12 +545,11 @@ async function enrichPlayers(players: Player[], cache: CacheStore) {
   });
 
   const batches = chunkArray(stalePlayers, PEOPLE_BATCH_SIZE);
-  const refreshed = await mapLimit(batches, 4, async (batch) => {
+  const refreshed = await mapLimit(batches, 8, async (batch) => {
     const cards = await fetchPlayerCardBatch(batch.map((player) => player.id));
     let usefulCards = 0;
 
-    await Promise.all(
-      batch.map(async (player) => {
+    const rows = batch.map((player) => {
         const current = metas.get(player.id);
         const card = cards.get(player.id) ?? { checked: false };
         const merged = emptyFallback(card, player);
@@ -380,22 +560,20 @@ async function enrichPlayers(players: Player[], cache: CacheStore) {
           usefulCards += 1;
         }
 
-        await writePlayerMeta(
-          {
-            playerId: player.id,
-            ...merged,
-            fetchedAt: now,
-            expiresAt: now + (checked ? PLAYER_META_TTL_MS : FAILED_CARD_TTL_MS),
-            failCount: checked
-              ? hasDraftOrSchool
-                ? 0
-                : -1
-              : Math.max(0, current?.failCount ?? 0) + 1,
-          },
-          cache,
-        );
-      }),
-    );
+        return {
+          playerId: player.id,
+          ...merged,
+          fetchedAt: now,
+          expiresAt: now + (checked ? PLAYER_META_TTL_MS : FAILED_CARD_TTL_MS),
+          failCount: checked
+            ? hasDraftOrSchool
+              ? 0
+              : -1
+            : Math.max(0, current?.failCount ?? 0) + 1,
+        };
+      });
+
+    await writePlayerMetas(rows, cache);
 
     return usefulCards;
   });
@@ -418,33 +596,40 @@ async function getOfficialPlayerCard(playerId: number): Promise<FetchedPlayerCar
 
 async function fetchPlayerCardBatch(playerIds: number[]) {
   const uniqueIds = Array.from(new Set(playerIds)).filter(Number.isFinite);
-  const results = new Map<number, FetchedPlayerCard>();
 
   if (uniqueIds.length === 0) {
-    return results;
+    return new Map<number, FetchedPlayerCard>();
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CARD_TIMEOUT_MS);
+  for (let attempt = 1; attempt <= CARD_FETCH_ATTEMPTS; attempt += 1) {
+    const results = new Map<number, FetchedPlayerCard>();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CARD_TIMEOUT_MS);
 
-  try {
-    const payload = await statsApi(
-      `/people?personIds=${uniqueIds.join(",")}&hydrate=draft,education`,
-      controller.signal,
-    );
-    for (const person of arrayOf(payload.people)) {
-      const normalized = normalizePersonCard(objectOf(person));
-      if (normalized) {
-        results.set(normalized.playerId, normalized.card);
+    try {
+      const payload = await statsApi(
+        `/people?personIds=${uniqueIds.join(",")}&hydrate=draft,education`,
+        controller.signal,
+      );
+      for (const person of arrayOf(payload.people)) {
+        const normalized = normalizePersonCard(objectOf(person));
+        if (normalized) {
+          results.set(normalized.playerId, normalized.card);
+        }
       }
+      if (results.size > 0 || attempt === CARD_FETCH_ATTEMPTS) {
+        return results;
+      }
+    } catch {
+      if (attempt === CARD_FETCH_ATTEMPTS) {
+        return results;
+      }
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch {
-    return results;
-  } finally {
-    clearTimeout(timeout);
   }
 
-  return results;
+  return new Map<number, FetchedPlayerCard>();
 }
 
 async function statsApi(path: string, signal?: AbortSignal): Promise<Dict> {
@@ -483,9 +668,16 @@ async function ensureSchema(db: D1Database) {
     db.prepare(
       "CREATE TABLE IF NOT EXISTS player_meta_cache (player_id INTEGER PRIMARY KEY, draft TEXT NOT NULL DEFAULT '', school TEXT NOT NULL DEFAULT '', school_type TEXT NOT NULL DEFAULT '', birth_city TEXT NOT NULL DEFAULT '', birth_state TEXT NOT NULL DEFAULT '', birth_country TEXT NOT NULL DEFAULT '', fetched_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, fail_count INTEGER NOT NULL DEFAULT 0)",
     ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS daily_snapshot_state (date TEXT PRIMARY KEY, generation TEXT NOT NULL, team_count INTEGER NOT NULL, player_count INTEGER NOT NULL, missing_draft INTEGER NOT NULL, missing_school INTEGER NOT NULL, built_at INTEGER NOT NULL)",
+    ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS daily_team_snapshot (date TEXT NOT NULL, generation TEXT NOT NULL, team_id INTEGER NOT NULL, team_name TEXT NOT NULL, payload TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (date, generation, team_id))",
+    ),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_schedule_cache_expires_at ON schedule_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_roster_cache_expires_at ON roster_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_player_meta_cache_expires_at ON player_meta_cache (expires_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_daily_team_snapshot_lookup ON daily_team_snapshot (date, generation, team_id)"),
     db.prepare("PRAGMA optimize"),
   ]);
 }
@@ -625,13 +817,18 @@ async function readPlayerMetas(playerIds: number[], cache: CacheStore) {
 }
 
 async function writePlayerMeta(row: PlayerMetaRow, cache: CacheStore) {
+  await writePlayerMetas([row], cache);
+}
+
+async function writePlayerMetas(rows: PlayerMetaRow[], cache: CacheStore) {
   if (!cache.db) {
-    memoryPlayers.set(row.playerId, row);
+    for (const row of rows) {
+      memoryPlayers.set(row.playerId, row);
+    }
     return;
   }
 
-  await cache.db
-    .prepare(
+  const statements = rows.map((row) => cache.db!.prepare(
       "INSERT INTO player_meta_cache (player_id, draft, school, school_type, birth_city, birth_state, birth_country, fetched_at, expires_at, fail_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(player_id) DO UPDATE SET draft = excluded.draft, school = excluded.school, school_type = excluded.school_type, birth_city = excluded.birth_city, birth_state = excluded.birth_state, birth_country = excluded.birth_country, fetched_at = excluded.fetched_at, expires_at = excluded.expires_at, fail_count = excluded.fail_count",
     )
     .bind(
@@ -645,8 +842,11 @@ async function writePlayerMeta(row: PlayerMetaRow, cache: CacheStore) {
       row.fetchedAt,
       row.expiresAt,
       row.failCount,
-    )
-    .run();
+    ));
+
+  for (const batch of chunkArray(statements, 50)) {
+    await cache.db.batch(batch);
+  }
 }
 
 function normalizeGame(value: unknown): Game | null {
@@ -761,6 +961,7 @@ function normalizePersonCard(
 function latestDraftEntry(person: Dict) {
   return arrayOrSingle(person.drafts)
     .map(objectOf)
+    .filter((draft) => draft.isDrafted !== false && draft.isPass !== true)
     .sort((a, b) => stringOf(b.year).localeCompare(stringOf(a.year)))[0] ?? {};
 }
 
@@ -953,17 +1154,8 @@ function schoolTypeFromDraftSchool(school: Dict) {
 }
 
 function extractDraft(person: Dict) {
-  const draft = objectOf(findNestedValue(person, ["draft"]));
-  const year = stringOf(draft.year) || stringOf(person.draftYear);
-  const team = stringOf(objectOf(draft.team).name) || stringOf(draft.teamName);
-  const round = stringOf(draft.pickRound) || stringOf(draft.round);
-  const pick = stringOf(draft.pickNumber) || stringOf(draft.overallPick);
-
-  if (year && team && round && pick) {
-    return `${year}, ${team}, Round: ${round}, Overall Pick: ${pick}`;
-  }
-
-  return "";
+  const draft = latestDraftEntry(person);
+  return formatDraft(draft, person);
 }
 
 function findNestedValue(value: unknown, keys: string[], depth = 0): unknown {
@@ -1049,6 +1241,22 @@ function emptyFallback(card: Partial<PlayerCard>, player: Player) {
   };
 }
 
+function withExplicitMissingValues(player: Player): Player {
+  return {
+    ...player,
+    draft: player.draft || "Not listed by MiLB",
+    school: player.school || "Not listed by MiLB",
+    schoolType: player.schoolType || "Not listed",
+    birthCity: player.birthCity || "Not listed",
+    birthState: player.birthState || "",
+    birthCountry: player.birthCountry || "Not listed",
+  };
+}
+
+function isNotListed(value: string) {
+  return !value || value === "Not listed by MiLB" || value === "Not listed";
+}
+
 function hasUsefulBio(card: Partial<PlayerCard>) {
   return Boolean(
     card.draft ||
@@ -1061,7 +1269,7 @@ function hasUsefulBio(card: Partial<PlayerCard>) {
 }
 
 function isFailedMeta(meta: PlayerMetaRow) {
-  return meta.failCount > 0 && !hasUsefulBio(meta);
+  return meta.failCount > 0;
 }
 
 function isUnverifiedBackgroundMeta(meta: PlayerMetaRow) {

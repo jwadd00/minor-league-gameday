@@ -215,29 +215,19 @@ export function GamedayApp() {
   const [allPlayers, setAllPlayers] = useState<ApiState<PlayerIndex>>({
     status: "idle",
   });
-  const [playerWarmOffset, setPlayerWarmOffset] = useState(0);
-  const [playerWarmDone, setPlayerWarmDone] = useState(false);
-  const [isWarmingPlayers, setIsWarmingPlayers] = useState(false);
   const [query, setQuery] = useState("");
   const [school, setSchool] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [gameQuery, setGameQuery] = useState("");
   const [gameCategory, setGameCategory] = useState<GameCategory>("fullSeason");
-  const [enrichedGameKeys, setEnrichedGameKeys] = useState<string[]>([]);
-  const [isEnriching, setIsEnriching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setGames({ status: "loading" });
     setSelectedGamePk(null);
     setGameDetail({ status: "idle" });
-    setAllPlayers({ status: "idle" });
-    setPlayerWarmOffset(0);
-    setPlayerWarmDone(false);
-    setIsWarmingPlayers(false);
-    setEnrichedGameKeys([]);
-    setIsEnriching(false);
+    setAllPlayers({ status: "loading" });
 
     getJson<{ games: Game[] }>(`/api/milb?view=games&date=${date}`)
       .then((payload) => {
@@ -248,6 +238,18 @@ export function GamedayApp() {
       .catch((error: Error) => {
         if (!cancelled) {
           setGames({ status: "error", error: error.message });
+        }
+      });
+
+    getJson<PlayerIndex>(`/api/milb?view=players&date=${date}`)
+      .then((payload) => {
+        if (!cancelled) {
+          setAllPlayers({ status: "ready", data: payload });
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setAllPlayers({ status: "error", error: error.message });
         }
       });
 
@@ -281,132 +283,10 @@ export function GamedayApp() {
     };
   }, [date, selectedGamePk]);
 
-  useEffect(() => {
-    if (
-      gameDetail.status !== "ready" ||
-      !gameDetail.data?.cacheInfo ||
-      !selectedGamePk
-    ) {
-      return;
-    }
-
-    const staleOrMissing =
-      gameDetail.data.cacheInfo.staleBio + gameDetail.data.cacheInfo.missingBio;
-    const key = `${date}:${selectedGamePk}`;
-    if (staleOrMissing === 0 || enrichedGameKeys.includes(key)) {
-      return;
-    }
-
-    let cancelled = false;
-    setEnrichedGameKeys((current) => [...current, key]);
-    setIsEnriching(true);
-
-    getJson<GameDetail>(`/api/milb?view=enrichGame&date=${date}&gamePk=${selectedGamePk}`)
-      .then((payload) => {
-        if (!cancelled) {
-          setGameDetail({ status: "ready", data: payload });
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) {
-          setIsEnriching(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [date, enrichedGameKeys, gameDetail, selectedGamePk]);
-
-  useEffect(() => {
-    if (games.status !== "ready" || allPlayers.status !== "idle") {
-      return;
-    }
-
-    let cancelled = false;
-    setAllPlayers({ status: "loading" });
-
-    getJson<PlayerIndex>(`/api/milb?view=players&date=${date}`)
-      .then((payload) => {
-        if (!cancelled) {
-          setAllPlayers({ status: "ready", data: payload });
-        }
-      })
-      .catch((error: Error) => {
-        if (!cancelled) {
-          setAllPlayers({ status: "error", error: error.message });
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [allPlayers.status, date, games.status]);
-
-  useEffect(() => {
-    if (
-      allPlayers.status !== "ready" ||
-      playerWarmDone ||
-      isWarmingPlayers
-    ) {
-      return;
-    }
-
-    const pending =
-      (allPlayers.data?.cacheInfo?.missingBio ?? 0) +
-      (allPlayers.data?.cacheInfo?.staleBio ?? 0);
-
-    if (pending === 0) {
-      setPlayerWarmDone(true);
-      return;
-    }
-
-    let cancelled = false;
-    setIsWarmingPlayers(true);
-
-    getJson<{ nextOffset: number | null }>(
-      `/api/milb?view=warm&date=${date}&scope=all&offset=${playerWarmOffset}&limitTeams=24`,
-    )
-      .then(async (warmResult) => {
-        const payload = await getJson<PlayerIndex>(`/api/milb?view=players&date=${date}`);
-        if (!cancelled) {
-          setAllPlayers({ status: "ready", data: payload });
-          setPlayerWarmOffset(warmResult.nextOffset ?? 0);
-          setPlayerWarmDone(warmResult.nextOffset === null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPlayerWarmDone(true);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsWarmingPlayers(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    allPlayers.data?.cacheInfo?.missingBio,
-    allPlayers.data?.cacheInfo?.staleBio,
-    allPlayers.status,
-    date,
-    isWarmingPlayers,
-    playerWarmDone,
-    playerWarmOffset,
-  ]);
-
   const selectedGame =
     games.data?.find((game) => game.gamePk === selectedGamePk) ?? null;
 
   const playersForPage = allPlayers.data?.players ?? [];
-  const playerCacheInfo = allPlayers.data?.cacheInfo;
-  const pendingPlayerBios =
-    (playerCacheInfo?.missingBio ?? 0) + (playerCacheInfo?.staleBio ?? 0);
 
   function scrollTo(ref: { current: Element | null }) {
     setTimeout(() => {
@@ -691,13 +571,7 @@ export function GamedayApp() {
               ) : null}
 
               {gameDetail.status === "ready" && gameDetail.data ? (
-                <>
-                  <CacheNote
-                    cacheInfo={gameDetail.data.cacheInfo}
-                    isEnriching={isEnriching}
-                  />
-                  <RosterTables detail={gameDetail.data} />
-                </>
+                <RosterTables detail={gameDetail.data} />
               ) : null}
             </section>
           </div>
@@ -766,14 +640,6 @@ export function GamedayApp() {
             {allPlayers.status === "loading" ? (
               <div className="inline-status player-status" role="status" aria-live="polite">
                 Loading the day-wide player table
-              </div>
-            ) : null}
-
-            {allPlayers.status === "ready" && pendingPlayerBios > 0 ? (
-              <div className="inline-status player-status" role="status" aria-live="polite">
-                {isWarmingPlayers
-                  ? `Warming draft and school data for ${pendingPlayerBios} players`
-                  : `${pendingPlayerBios} player cards queued for draft and school data`}
               </div>
             ) : null}
 
@@ -869,35 +735,6 @@ function RosterTables({ detail }: { detail: GameDetail }) {
         ))}
       </div>
       <PlayerTableEnhanced players={players} />
-    </div>
-  );
-}
-
-function CacheNote({
-  cacheInfo,
-  isEnriching,
-}: {
-  cacheInfo?: CacheInfo;
-  isEnriching: boolean;
-}) {
-  if (!cacheInfo) {
-    return null;
-  }
-
-  const pending = cacheInfo.staleBio + cacheInfo.missingBio;
-
-  return (
-    <div className="cache-note" aria-live="polite">
-      <span>
-        {cacheInfo.freshBio}/{cacheInfo.totalPlayers} bios cached
-      </span>
-      <span>
-        {pending > 0
-          ? isEnriching
-            ? `Refreshing ${pending} player bios`
-            : `${pending} player bios queued`
-          : "Player bios are warm"}
-      </span>
     </div>
   );
 }

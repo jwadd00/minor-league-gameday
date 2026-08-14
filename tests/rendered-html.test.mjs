@@ -79,3 +79,23 @@ test("keeps game cards aligned to the modern horizontal spec", async () => {
   assert.match(css, /\.game > span:not\(\.level\)\s*{[^}]*grid-column:\s*3;/s);
   assert.match(css, /\.game small\s*{[^}]*grid-column:\s*1;/s);
 });
+
+test("preloads players from a scheduled daily snapshot without client warming", async () => {
+  const [client, route, worker, vite] = await Promise.all([
+    readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(client, /getJson<PlayerIndex>\(`\/api\/milb\?view=players&date=\$\{date\}`\)/);
+  assert.doesNotMatch(client, /view=warm|view=enrichGame|Warming draft|queued for draft/);
+  assert.match(route, /readDailySnapshot\(date, cache\)/);
+  assert.match(route, /daily_snapshot_state/);
+  assert.match(route, /daily_team_snapshot/);
+  assert.match(route, /withExplicitMissingValues/);
+  assert.match(route, /Snapshot validation failed because \$\{unresolvedPlayers\.length\} player records were not verified/);
+  assert.doesNotMatch(route, /if \(view === "warm"\)/);
+  assert.match(worker, /async scheduled\(/);
+  assert.match(vite, /crons:\s*\["0 10,14,18,22 \* \* \*"\]/);
+});
