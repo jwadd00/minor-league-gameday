@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1786680586884,
+      "tag": "0000_gameday_cache",
+      "breakpoints": true
+    }
+  ]
+}
