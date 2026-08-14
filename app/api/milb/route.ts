@@ -185,6 +185,7 @@ export async function materializeDailySnapshot(date: string) {
   const teams = uniqueTeams(games);
   const generation = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
   const builtAt = Date.now();
+  const enrichmentErrors: string[] = [];
   const baseSnapshots = await mapLimit(teams, 8, async (team) => ({
     team,
     players: await getBaseRoster(team, date, cache, true),
@@ -196,7 +197,7 @@ export async function materializeDailySnapshot(date: string) {
         .map((player) => [player.id, player]),
     ).values(),
   );
-  await enrichPlayers(uniquePlayers, cache);
+  await enrichPlayers(uniquePlayers, cache, enrichmentErrors);
 
   const teamSnapshots = await mapLimit(baseSnapshots, 8, async (entry) => {
     const merged = await mergeCachedBio(entry.players, cache);
@@ -214,8 +215,11 @@ export async function materializeDailySnapshot(date: string) {
     throw new Error("Snapshot validation failed because the schedule or rosters were empty.");
   }
   if (unresolvedPlayers.length > 0) {
+    const diagnostics = Array.from(new Set(enrichmentErrors)).slice(0, 3);
     throw new Error(
-      `Snapshot validation failed because ${unresolvedPlayers.length} player records were not verified.`,
+      `Snapshot validation failed because ${unresolvedPlayers.length} player records were not verified.${
+        diagnostics.length > 0 ? ` Upstream: ${diagnostics.join(" | ")}` : ""
+      }`,
     );
   }
   const missingDraft = players.filter((player) => isNotListed(player.draft)).length;
@@ -544,7 +548,11 @@ async function mergeCachedBio(
   };
 }
 
-async function enrichPlayers(players: Player[], cache: CacheStore) {
+async function enrichPlayers(
+  players: Player[],
+  cache: CacheStore,
+  errors: string[] = [],
+) {
   const now = Date.now();
   const metas = await readPlayerMetas(players.map((player) => player.id), cache);
   const stalePlayers = players.filter((player) => {
@@ -562,7 +570,10 @@ async function enrichPlayers(players: Player[], cache: CacheStore) {
     batches,
     PEOPLE_FETCH_CONCURRENCY,
     async (batch) => {
-      const cards = await fetchPlayerCardBatch(batch.map((player) => player.id));
+      const cards = await fetchPlayerCardBatch(
+        batch.map((player) => player.id),
+        errors,
+      );
       let usefulCards = 0;
 
       const rows = batch.map((player) => {
@@ -611,7 +622,7 @@ async function getOfficialPlayerCard(playerId: number): Promise<FetchedPlayerCar
   return promise;
 }
 
-async function fetchPlayerCardBatch(playerIds: number[]) {
+async function fetchPlayerCardBatch(playerIds: number[], errors: string[] = []) {
   const uniqueIds = Array.from(new Set(playerIds)).filter(Number.isFinite);
 
   if (uniqueIds.length === 0) {
@@ -641,12 +652,16 @@ async function fetchPlayerCardBatch(playerIds: number[]) {
         return results;
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      if (errors.length < 10) {
+        errors.push(message);
+      }
       console.error(
         JSON.stringify({
           event: "player_card_batch_failed",
           attempt,
           pendingPlayers: pendingIds.length,
-          message: error instanceof Error ? error.message : "Unknown error",
+          message,
         }),
       );
     } finally {
