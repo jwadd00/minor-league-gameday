@@ -56,6 +56,8 @@ main {
   isolation: isolate;
   overflow-x: hidden;
   background:
+    linear-gradient(180deg, rgba(8, 10, 13, 0.42), rgba(8, 10, 13, 0.88)),
+    url("/old-ballpark-bg.png") center top / cover fixed,
     radial-gradient(circle at 18% 10%, rgba(77, 232, 255, 0.16), transparent 34%),
     radial-gradient(circle at 82% 8%, rgba(36, 245, 193, 0.12), transparent 30%),
     linear-gradient(180deg, #121212 0%, #0d1014 58%, #090b0f 100%) !important;
@@ -120,10 +122,14 @@ main::after {
   align-items: center;
   margin-right: auto;
   color: #ffffff;
-  font-size: 0.94rem;
+  font-family: "Brush Script MT", "Segoe Script", "Snell Roundhand", cursive;
+  font-size: 1.42rem;
   font-weight: 900;
   letter-spacing: 0;
-  text-transform: uppercase;
+  text-transform: none;
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.85),
+    0 0 18px rgba(223, 192, 120, 0.3);
 }
 
 .topnav strong::before {
@@ -183,10 +189,12 @@ h2 {
 h1 {
   max-width: 780px;
   color: #ffffff;
+  font-family: "Brush Script MT", "Segoe Script", "Snell Roundhand", Georgia, serif;
   font-size: clamp(3rem, 6.4vw, 6rem);
   font-weight: 900;
   line-height: 0.92;
   text-shadow:
+    0 1px 0 rgba(223, 192, 120, 0.62),
     0 0 28px rgba(77, 232, 255, 0.2),
     0 18px 54px rgba(0, 0, 0, 0.72);
 }
@@ -316,7 +324,7 @@ select:focus {
   border-radius: 22px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
-    rgba(19, 23, 29, 0.72);
+    rgba(13, 18, 23, 0.76);
   box-shadow:
     18px 24px 70px rgba(0, 0, 0, 0.5),
     -8px -8px 26px rgba(255, 255, 255, 0.035),
@@ -439,6 +447,7 @@ select:focus {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
   background:
+    linear-gradient(180deg, rgba(120, 62, 34, 0.16), transparent 58%),
     linear-gradient(90deg, rgba(77, 232, 255, 0.12), transparent 36%),
     rgba(255, 255, 255, 0.045);
   color: var(--text);
@@ -559,6 +568,9 @@ select:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
+  justify-self: center;
+  width: 38px;
   min-height: 28px;
   border: 1px solid rgba(77, 232, 255, 0.24);
   border-radius: 999px;
@@ -605,6 +617,18 @@ select:focus {
   min-width: 0;
   align-items: center;
   gap: 8px;
+}
+
+.game-teams .team-name {
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+
+.game-teams .team-logo {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
 }
 
 .team-name > span:last-child {

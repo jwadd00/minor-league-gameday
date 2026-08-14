@@ -51,6 +51,8 @@ test("keeps the product styling and removes starter preview assets", async () =>
   assert.match(css, /--bg:\s*#121212/);
   assert.match(css, /--blue:\s*#4de8ff/);
   assert.match(css, /--green:\s*#24f5c1/);
+  assert.match(css, /url\("\/old-ballpark-bg\.png"\)/);
+  assert.match(css, /font-family:\s*"Brush Script MT"/);
   assert.match(css, /backdrop-filter:\s*blur/);
   assert.match(css, /\.game::after/);
   assert.match(css, /content:\s*"View roster"/);
@@ -72,6 +74,8 @@ test("keeps game cards aligned to the modern horizontal spec", async () => {
   );
   assert.match(css, /\.game::after\s*{[^}]*grid-column:\s*4;/s);
   assert.match(css, /\.game-teams\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*46px\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.game-teams \.team-name\s*{[^}]*flex-direction:\s*column;/s);
+  assert.match(css, /\.game-teams \.versus\s*{[^}]*justify-self:\s*center;/s);
   assert.match(css, /\.game > span:not\(\.level\)\s*{[^}]*grid-column:\s*3;/s);
   assert.match(css, /\.game small\s*{[^}]*grid-column:\s*1;/s);
 });
