@@ -1,17 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #07111c;
-  --panel: #111b29;
-  --panel-strong: #172436;
-  --panel-soft: #0c1724;
-  --line: rgba(134, 163, 184, 0.24);
-  --text: #eaf7ff;
-  --muted: #93a8b8;
-  --blue: #20c7ff;
-  --green: #20f29a;
-  --gold: #f4c84a;
-  --clay: #ff7a45;
+  --bg: #070b0e;
+  --panel: #11171d;
+  --panel-strong: #192126;
+  --panel-soft: #0c1215;
+  --line: rgba(198, 169, 102, 0.26);
+  --text: #f3efe4;
+  --muted: #a7adb0;
+  --blue: #4de8ff;
+  --green: #24f5c1;
+  --gold: #d9b96a;
+  --gold-deep: #8c6d32;
+  --leather: #6b3524;
+  --steel: #222a2e;
+  --turf: #0d3526;
 }
 
 @theme inline {
@@ -29,7 +32,7 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Segoe UI", Arial, Helvetica, sans-serif;
 }
 
 button,
@@ -60,23 +63,28 @@ main::before {
   z-index: -2;
   content: "";
   background:
-    linear-gradient(90deg, rgba(32, 199, 255, 0.08) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(32, 242, 154, 0.06) 1px, transparent 1px),
-    linear-gradient(135deg, #07111c 0%, #0a2434 46%, #061018 100%);
-  background-size: 72px 72px, 72px 72px, auto;
+    linear-gradient(90deg, rgba(77, 232, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(36, 245, 193, 0.055) 1px, transparent 1px),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 8px),
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.28) 0 1px, transparent 1px 9px),
+    radial-gradient(circle at 50% -10%, rgba(77, 232, 255, 0.15), transparent 44%),
+    linear-gradient(135deg, #0b1014 0%, #0d1b1d 42%, #06080a 100%);
+  background-size: 84px 84px, 84px 84px, 16px 16px, 18px 18px, auto, auto;
 }
 
 main::after {
   position: fixed;
   inset: auto 0 0;
   z-index: -1;
-  height: 38vh;
+  height: 42vh;
   content: "";
   background:
-    linear-gradient(90deg, transparent, rgba(32, 199, 255, 0.26), transparent),
-    repeating-linear-gradient(90deg, transparent 0 36px, rgba(32, 242, 154, 0.18) 38px, transparent 40px);
-  clip-path: polygon(0 72%, 100% 28%, 100% 100%, 0 100%);
-  opacity: 0.5;
+    linear-gradient(90deg, transparent, rgba(77, 232, 255, 0.24), transparent),
+    repeating-linear-gradient(90deg, transparent 0 46px, rgba(36, 245, 193, 0.14) 48px, transparent 50px),
+    repeating-linear-gradient(0deg, transparent 0 38px, rgba(217, 185, 106, 0.08) 39px, transparent 41px),
+    linear-gradient(180deg, rgba(13, 53, 38, 0), rgba(13, 53, 38, 0.58));
+  clip-path: polygon(0 63%, 100% 36%, 100% 100%, 0 100%);
+  opacity: 0.72;
 }
 
 .topbar {
@@ -86,7 +94,7 @@ main::after {
   align-items: center;
   width: min(1440px, calc(100% - 48px));
   margin: 14px auto 0;
-  padding: 10px 0 18px;
+  padding: 10px 0 20px;
 }
 
 .topnav {
@@ -95,27 +103,40 @@ main::after {
   gap: 26px;
   align-items: center;
   min-height: 46px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(217, 185, 106, 0.38);
   border-radius: 8px;
-  background: rgba(17, 27, 41, 0.82);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.07), transparent 18%, rgba(255, 255, 255, 0.04) 52%, transparent),
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 5px),
+    linear-gradient(180deg, rgba(42, 49, 54, 0.94), rgba(13, 18, 21, 0.94));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.78),
+    0 22px 60px rgba(0, 0, 0, 0.46);
   padding: 0 18px;
   backdrop-filter: blur(16px);
 }
 
 .topnav strong {
   margin-right: auto;
-  color: #ffffff;
-  font-size: 1rem;
+  color: var(--gold);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  font-weight: 900;
+  text-shadow:
+    0 1px 0 #241705,
+    0 0 14px rgba(217, 185, 106, 0.28);
   text-transform: uppercase;
 }
 
 .topnav button {
   min-height: 36px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(217, 185, 106, 0.2);
   border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.18)),
+    rgba(15, 21, 24, 0.34);
+  color: #d1c4a3;
   padding: 0 12px;
   font-size: 0.82rem;
   font-weight: 800;
@@ -124,9 +145,12 @@ main::after {
 
 .topnav button:hover,
 .topnav button.active {
-  border-color: rgba(32, 242, 154, 0.36);
-  background: rgba(32, 242, 154, 0.1);
+  border-color: rgba(77, 232, 255, 0.54);
+  background:
+    linear-gradient(180deg, rgba(36, 245, 193, 0.22), rgba(7, 12, 14, 0.62)),
+    rgba(36, 245, 193, 0.1);
   color: #ffffff;
+  box-shadow: 0 0 18px rgba(77, 232, 255, 0.2);
 }
 
 .eyebrow {
@@ -146,14 +170,23 @@ h2 {
 
 h1 {
   max-width: 780px;
-  color: #ffffff;
-  font-size: clamp(2.1rem, 3.8vw, 3.35rem);
+  color: #f4ead2;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.7rem, 5.8vw, 5.1rem);
   font-weight: 900;
   line-height: 0.92;
+  background: linear-gradient(180deg, #fff7e0 0%, #d1b264 37%, #778086 58%, #f0d390 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0.7px rgba(93, 75, 34, 0.72);
+  text-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.72),
+    0 0 22px rgba(217, 185, 106, 0.18);
 }
 
 h2 {
-  color: #ffffff;
+  color: #fbf6e8;
   font-size: clamp(1.15rem, 2vw, 1.7rem);
 }
 
@@ -170,16 +203,22 @@ h2 {
   grid-template-columns: 40px minmax(170px, 1fr) 40px;
   gap: 8px;
   align-items: stretch;
-  border: 1px solid rgba(32, 199, 255, 0.3);
+  border: 1px solid rgba(217, 185, 106, 0.34);
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(23, 36, 54, 0.94), rgba(9, 19, 31, 0.94));
-  box-shadow: 0 0 34px rgba(32, 199, 255, 0.14);
+  background:
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 6px),
+    linear-gradient(135deg, rgba(37, 43, 47, 0.95), rgba(9, 13, 15, 0.95));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 34px rgba(77, 232, 255, 0.14);
   padding: 10px;
 }
 
 .date-control button {
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(217, 185, 106, 0.35);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.26)),
+    var(--steel);
   color: var(--text);
   cursor: pointer;
 }
@@ -206,7 +245,7 @@ h2 {
 
 .date-control button:hover {
   border-color: var(--blue);
-  box-shadow: 0 0 18px rgba(32, 199, 255, 0.24);
+  box-shadow: 0 0 18px rgba(77, 232, 255, 0.3);
 }
 
 .date-control label,
@@ -236,9 +275,11 @@ h2 {
 .table-tools select {
   width: 100%;
   min-height: 44px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(217, 185, 106, 0.26);
   border-radius: 8px;
-  background: #0c1724;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.14)),
+    #0c1215;
   color: var(--text);
   padding: 0 12px;
   outline: none;
@@ -246,14 +287,14 @@ h2 {
 
 .date-control input {
   min-height: 48px;
-  border-color: rgba(32, 199, 255, 0.28);
-  background: #101a28;
+  border-color: rgba(77, 232, 255, 0.3);
+  background: #11181d;
 }
 
 input:focus,
 select:focus {
   border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(32, 199, 255, 0.12);
+  box-shadow: 0 0 0 3px rgba(77, 232, 255, 0.13);
 }
 
 .workspace {
@@ -273,10 +314,15 @@ select:focus {
 .detail-panel,
 .players-panel {
   min-width: 0;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(217, 185, 106, 0.32);
   border-radius: 8px;
-  background: rgba(17, 27, 41, 0.86);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34);
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.024) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, rgba(33, 39, 43, 0.9), rgba(9, 13, 15, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.62),
+    0 26px 70px rgba(0, 0, 0, 0.48);
   backdrop-filter: blur(14px);
 }
 
@@ -306,9 +352,11 @@ select:focus {
 
 .panel-heading > span,
 .summary-strip > span {
-  border: 1px solid rgba(32, 242, 154, 0.32);
+  border: 1px solid rgba(36, 245, 193, 0.44);
   border-radius: 999px;
-  background: rgba(32, 242, 154, 0.1);
+  background:
+    linear-gradient(180deg, rgba(36, 245, 193, 0.18), rgba(8, 12, 14, 0.52)),
+    rgba(36, 245, 193, 0.1);
   color: var(--green);
   padding: 7px 10px;
   font-size: 0.82rem;
@@ -334,9 +382,12 @@ select:focus {
   display: grid;
   gap: 3px;
   min-height: 58px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(217, 185, 106, 0.32);
   border-radius: 8px;
-  background: var(--panel-strong);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.055), transparent 28%, rgba(255, 255, 255, 0.035)),
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.026) 0 1px, transparent 1px 5px),
+    linear-gradient(180deg, #252b2f, #12181b);
   color: #ffffff;
   padding: 8px;
   font-weight: 900;
@@ -352,8 +403,12 @@ select:focus {
 .category-row button.active,
 .category-row button:hover {
   border-color: var(--green);
-  background: linear-gradient(135deg, rgba(32, 242, 154, 0.22), rgba(32, 199, 255, 0.14));
-  box-shadow: 0 0 22px rgba(32, 242, 154, 0.16);
+  background:
+    linear-gradient(180deg, rgba(36, 245, 193, 0.26), rgba(12, 18, 20, 0.7)),
+    repeating-linear-gradient(100deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 5px);
+  box-shadow:
+    inset 0 0 18px rgba(77, 232, 255, 0.12),
+    0 0 24px rgba(36, 245, 193, 0.22);
 }
 
 .category-row button.active small,
@@ -370,7 +425,7 @@ select:focus {
   align-content: start;
   overflow-y: auto;
   padding-right: 8px;
-  scrollbar-color: var(--blue) rgba(255, 255, 255, 0.08);
+  scrollbar-color: var(--blue) rgba(255, 255, 255, 0.1);
   scrollbar-width: thin;
 }
 
@@ -381,27 +436,80 @@ select:focus {
   gap: 10px 14px;
   width: 100%;
   min-height: 126px;
-  border: 1px solid var(--line);
+  overflow: hidden;
+  border: 1px solid rgba(217, 185, 106, 0.38);
   border-radius: 8px;
   background:
-    linear-gradient(90deg, rgba(32, 199, 255, 0.12) 0 3px, transparent 3px),
-    linear-gradient(135deg, rgba(23, 36, 54, 0.98), rgba(12, 23, 36, 0.98));
+    linear-gradient(90deg, rgba(77, 232, 255, 0.28) 0 3px, transparent 3px),
+    radial-gradient(circle at 14% 18%, rgba(36, 245, 193, 0.12), transparent 28%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(90deg, rgba(13, 53, 38, 0.18) 0 1px, transparent 1px 9px),
+    linear-gradient(135deg, rgba(55, 37, 29, 0.96), rgba(16, 22, 24, 0.98) 56%, rgba(8, 39, 28, 0.82));
   color: var(--text);
   padding: 12px 12px 12px 14px;
   text-align: left;
   cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 16px 34px rgba(0, 0, 0, 0.28);
+}
+
+.game::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 78% 16%, rgba(217, 185, 106, 0.14), transparent 30%),
+    repeating-radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 7px);
+  mix-blend-mode: screen;
+  opacity: 0.62;
+}
+
+.game::after {
+  grid-column: 2;
+  width: fit-content;
+  align-self: end;
+  justify-self: end;
+  content: "View roster";
+  z-index: 1;
+  border: 1px solid rgba(77, 232, 255, 0.48);
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(0, 0, 0, 0.22)),
+    linear-gradient(135deg, rgba(37, 45, 48, 0.98), rgba(9, 13, 15, 0.98));
+  color: #dffeff;
+  padding: 6px 9px;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  box-shadow:
+    inset 0 0 0 1px rgba(217, 185, 106, 0.18),
+    0 0 16px rgba(77, 232, 255, 0.18);
+}
+
+.game > * {
+  position: relative;
+  z-index: 1;
 }
 
 .game:hover,
 .game.active {
   border-color: var(--blue);
-  box-shadow: 0 0 28px rgba(32, 199, 255, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 30px rgba(77, 232, 255, 0.24),
+    0 18px 38px rgba(0, 0, 0, 0.36);
   transform: translateY(-1px);
 }
 
 .game.active {
   border-color: var(--green);
-  box-shadow: 0 0 28px rgba(32, 242, 154, 0.2);
+  box-shadow:
+    inset 0 0 22px rgba(36, 245, 193, 0.08),
+    0 0 30px rgba(36, 245, 193, 0.24);
 }
 
 .game .level {
@@ -410,10 +518,15 @@ select:focus {
   align-content: center;
   justify-items: center;
   min-height: 74px;
-  border-right: 1px solid rgba(32, 199, 255, 0.32);
+  border-right: 1px solid rgba(77, 232, 255, 0.45);
+  border-radius: 6px 0 0 6px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.2)),
+    linear-gradient(135deg, rgba(18, 71, 55, 0.72), rgba(37, 42, 45, 0.72));
   color: var(--blue);
   font-size: 0.72rem;
   font-weight: 900;
+  text-shadow: 0 0 12px rgba(77, 232, 255, 0.36);
   text-transform: uppercase;
 }
 
@@ -427,25 +540,31 @@ select:focus {
 .team-logo {
   position: relative;
   display: inline-grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(217, 185, 106, 0.52);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 54%),
+    linear-gradient(145deg, rgba(217, 185, 106, 0.28), rgba(20, 25, 28, 0.92));
   color: #ffffff;
   font-size: 0.62rem;
   font-weight: 900;
+  box-shadow:
+    inset 0 0 8px rgba(0, 0, 0, 0.55),
+    0 0 12px rgba(217, 185, 106, 0.16);
 }
 
 .team-logo img {
   position: absolute;
-  inset: 3px;
-  width: calc(100% - 6px);
-  height: calc(100% - 6px);
+  inset: 4px;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
   object-fit: contain;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55));
 }
 
 .team-name {
@@ -462,18 +581,35 @@ select:focus {
 }
 
 .game-teams {
+  position: relative;
   display: grid;
-  gap: 7px;
+  gap: 8px;
+  border: 1px solid rgba(217, 185, 106, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.16), transparent 48%, rgba(77, 232, 255, 0.055) 50%, transparent 52%, rgba(0, 0, 0, 0.14)),
+    rgba(0, 0, 0, 0.12);
+  padding: 8px;
+}
+
+.game-teams::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 1px;
+  content: "";
+  background: linear-gradient(180deg, transparent, rgba(77, 232, 255, 0.32), transparent);
 }
 
 .game-teams .versus {
   display: inline-flex;
   width: fit-content;
-  margin-left: 38px;
-  border: 1px solid rgba(134, 163, 184, 0.22);
+  margin-left: 42px;
+  border: 1px solid rgba(77, 232, 255, 0.24);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--muted);
+  background: rgba(77, 232, 255, 0.08);
+  color: #d8c48e;
   padding: 2px 7px;
   font-size: 0.68rem;
   font-weight: 800;
@@ -487,6 +623,11 @@ select:focus {
   font-size: 0.82rem;
 }
 
+.game .team-name > span:last-child {
+  color: #fff6df;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.72);
+}
+
 .detail-head a,
 table a {
   color: var(--green);
@@ -495,9 +636,11 @@ table a {
 }
 
 .detail-head a {
-  border: 1px solid rgba(32, 242, 154, 0.34);
+  border: 1px solid rgba(36, 245, 193, 0.44);
   border-radius: 8px;
-  background: rgba(32, 242, 154, 0.08);
+  background:
+    linear-gradient(180deg, rgba(36, 245, 193, 0.16), rgba(0, 0, 0, 0.22)),
+    rgba(36, 245, 193, 0.08);
   padding: 10px 12px;
   white-space: nowrap;
 }
@@ -513,9 +656,11 @@ table a:hover {
   gap: 10px;
   align-content: center;
   min-height: 160px;
-  border: 1px dashed rgba(134, 163, 184, 0.32);
+  border: 1px dashed rgba(217, 185, 106, 0.32);
   border-radius: 8px;
-  background: rgba(12, 23, 36, 0.7);
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 8px),
+    rgba(12, 18, 21, 0.78);
   color: var(--muted);
   padding: 18px;
   text-align: center;
@@ -526,9 +671,11 @@ table a:hover {
   width: fit-content;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(32, 199, 255, 0.26);
+  border: 1px solid rgba(77, 232, 255, 0.32);
   border-radius: 999px;
-  background: rgba(32, 199, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(77, 232, 255, 0.12), rgba(0, 0, 0, 0.18)),
+    rgba(77, 232, 255, 0.08);
   color: #cdefff;
   padding: 7px 11px;
   font-size: 0.82rem;
@@ -594,9 +741,11 @@ td .team-logo {
 }
 
 .cache-note span {
-  border: 1px solid rgba(32, 199, 255, 0.26);
+  border: 1px solid rgba(77, 232, 255, 0.32);
   border-radius: 999px;
-  background: rgba(32, 199, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(77, 232, 255, 0.12), rgba(0, 0, 0, 0.16)),
+    rgba(77, 232, 255, 0.08);
   color: #cdefff;
   padding: 7px 10px;
   font-size: 0.82rem;
@@ -634,9 +783,11 @@ td .team-logo {
 
 .table-meta button {
   min-height: 34px;
-  border: 1px solid rgba(32, 242, 154, 0.34);
+  border: 1px solid rgba(36, 245, 193, 0.4);
   border-radius: 999px;
-  background: rgba(32, 242, 154, 0.08);
+  background:
+    linear-gradient(180deg, rgba(36, 245, 193, 0.14), rgba(0, 0, 0, 0.18)),
+    rgba(36, 245, 193, 0.08);
   color: var(--green);
   padding: 0 12px;
   font-size: 0.82rem;
@@ -651,9 +802,11 @@ td .team-logo {
 
 .table-wrap {
   overflow: auto;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(217, 185, 106, 0.28);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 8px),
+    var(--panel-soft);
 }
 
 table {
@@ -667,8 +820,9 @@ th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #162234;
-  color: #bdd1df;
+  background:
+    linear-gradient(180deg, rgba(49, 55, 59, 0.98), rgba(18, 23, 26, 0.98));
+  color: #d8c48e;
   font-size: 0.7rem;
   letter-spacing: 0;
   text-align: left;
@@ -703,6 +857,7 @@ td {
 
 td {
   color: #e4f2fb;
+  background: rgba(255, 255, 255, 0.008);
 }
 
 td:first-child,

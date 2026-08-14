@@ -519,7 +519,7 @@ export function GamedayApp() {
     <main className="min-h-screen bg-[#07111c] text-[#eaf7ff]">
       <section className="topbar">
         <nav className="topnav" aria-label="Site">
-          <strong>Gameday Scout</strong>
+          <strong>GAMEDAY SCOUT</strong>
           <button
             type="button"
             className={activeTab === "games" ? "active" : ""}
