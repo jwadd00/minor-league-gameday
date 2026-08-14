@@ -144,7 +144,7 @@ function teamLine(game: Game) {
 }
 
 function teamLogoUrl(teamId: number) {
-  return `https://www.milb.com/images/logos/team/current/${teamId}.svg`;
+  return `https://www.mlbstatic.com/team-logos/${teamId}.svg`;
 }
 
 function uniqueSorted(values: string[]) {
@@ -712,14 +712,16 @@ export function GamedayApp() {
               </label>
             </div>
 
-            {allPlayers.status === "loading" ? (
+            {allPlayers.status === "loading" && playerRows.length === 0 ? (
               <LoadingBlock
-                label={
-                  playerRows.length > 0
-                    ? "Adding the day-wide player index"
-                    : "Building the day-wide player index"
-                }
+                label="Building the day-wide player index"
               />
+            ) : null}
+
+            {allPlayers.status === "loading" && playerRows.length > 0 ? (
+              <div className="inline-status" role="status" aria-live="polite">
+                Adding the day-wide player index
+              </div>
             ) : null}
 
             {allPlayers.status === "error" ? (
