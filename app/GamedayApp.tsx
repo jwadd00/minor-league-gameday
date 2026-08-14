@@ -124,6 +124,31 @@ function formatGameTime(value: string) {
   }).format(new Date(value));
 }
 
+function compactDraft(value: string) {
+  if (value === "Not listed by MiLB") {
+    return "Not listed";
+  }
+
+  const match = value.match(
+    /^(\d{4}).*?Round:\s*([^,]+),\s*Overall Pick:\s*(\d+)/i,
+  );
+  return match ? `${match[1]} R${match[2]} / #${match[3]}` : value;
+}
+
+function compactPlayerMeta(player: Player) {
+  const position = [player.position, player.number ? `#${player.number}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  const birthplace = [
+    player.birthCity,
+    player.birthState || player.birthCountry,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return [position, birthplace].filter(Boolean).join(" / ");
+}
+
 function labelForDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     weekday: "long",
@@ -942,7 +967,7 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
             <thead>
               <tr>
                 {PLAYER_COLUMNS.map((column) => (
-                  <th key={column.key}>
+                  <th key={column.key} className={`col-${column.key}`}>
                     <button
                       type="button"
                       className="sort-button"
@@ -964,24 +989,35 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
             <tbody>
               {rows.map((player) => (
                 <tr key={`${player.teamId}-${player.id}`}>
-                  <td>
+                  <td className="col-name">
                     <a href={player.milbUrl} target="_blank" rel="noreferrer">
                       {player.name}
                     </a>
-                    <span>{player.status}</span>
+                    <span className="desktop-player-status">{player.status}</span>
+                    <span className="mobile-player-team">{player.teamName}</span>
+                    <span className="mobile-player-meta">
+                      {compactPlayerMeta(player)}
+                    </span>
                   </td>
-                  <td>
+                  <td className="col-teamName">
                     <PlayerTeamName player={player} />
                   </td>
-                  <td>{player.position || "-"}</td>
-                  <td>{player.number || "-"}</td>
-                  <td>{player.draft || "-"}</td>
-                  <td>
+                  <td className="col-position">{player.position || "-"}</td>
+                  <td className="col-number">{player.number || "-"}</td>
+                  <td className="col-draft">
+                    <span className="desktop-cell-value">{player.draft || "-"}</span>
+                    <span className="mobile-cell-value" title={player.draft}>
+                      {compactDraft(player.draft || "-")}
+                    </span>
+                  </td>
+                  <td className="col-school">
                     {player.school || "-"}
                     {player.schoolType ? <span>{player.schoolType}</span> : null}
                   </td>
-                  <td>{player.birthCity || "-"}</td>
-                  <td>{player.birthState || player.birthCountry || "-"}</td>
+                  <td className="col-birthCity">{player.birthCity || "-"}</td>
+                  <td className="col-state">
+                    {player.birthState || player.birthCountry || "-"}
+                  </td>
                 </tr>
               ))}
             </tbody>

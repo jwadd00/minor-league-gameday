@@ -80,6 +80,22 @@ test("keeps game cards aligned to the modern horizontal spec", async () => {
   assert.match(css, /\.game small\s*{[^}]*grid-column:\s*1;/s);
 });
 
+test("collapses player tables into three concise mobile columns", async () => {
+  const [client, css] = await Promise.all([
+    readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(client, /className="mobile-player-team"/);
+  assert.match(client, /className="mobile-player-meta"/);
+  assert.match(client, /compactDraft\(player\.draft/);
+  assert.match(css, /@media \(max-width: 620px\)/);
+  assert.match(css, /\.col-teamName,[\s\S]*?\.col-state\s*{\s*display:\s*none;/);
+  assert.match(css, /\.col-name\s*{\s*width:\s*39%;/);
+  assert.match(css, /\.col-draft\s*{\s*width:\s*25%;/);
+  assert.match(css, /\.col-school\s*{\s*width:\s*36%;/);
+});
+
 test("preloads players from a scheduled daily snapshot without client warming", async () => {
   const [client, route, worker, vite, scheduler, schedulerConfig] = await Promise.all([
     readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
