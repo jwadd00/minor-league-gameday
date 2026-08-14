@@ -1,0 +1,18 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "gameday-scout-snapshot-scheduler",
+  "main": "src/index.ts",
+  "workers_dev": false,
+  "compatibility_date": "2026-08-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "TARGET_URL": "https://minor-league-gameday-scout.jwadd00.chatgpt.site"
+  },
+  "triggers": {
+    "crons": ["0 10,14,18,22 * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

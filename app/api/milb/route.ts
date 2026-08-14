@@ -6,6 +6,8 @@ const API_BASE = "https://statsapi.mlb.com/api/v1";
 const MINOR_SPORT_IDS = "11,12,13,14,16";
 const CARD_TIMEOUT_MS = 20_000;
 const PEOPLE_BATCH_SIZE = 25;
+const PEOPLE_FETCH_CONCURRENCY = 8;
+const META_READ_BATCH_SIZE = 100;
 const CARD_FETCH_ATTEMPTS = 3;
 const SCHEDULE_TTL_MS = 3 * 60 * 1000;
 const ROSTER_TTL_MS = 15 * 60 * 1000;
@@ -183,12 +185,23 @@ export async function materializeDailySnapshot(date: string) {
   const teams = uniqueTeams(games);
   const generation = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
   const builtAt = Date.now();
-  const teamSnapshots = await mapLimit(teams, 8, async (team) => {
-    const basePlayers = await getBaseRoster(team, date, cache, true);
-    await enrichPlayers(basePlayers, cache);
-    const merged = await mergeCachedBio(basePlayers, cache);
+  const baseSnapshots = await mapLimit(teams, 8, async (team) => ({
+    team,
+    players: await getBaseRoster(team, date, cache, true),
+  }));
+  const uniquePlayers = Array.from(
+    new Map(
+      baseSnapshots
+        .flatMap((entry) => entry.players)
+        .map((player) => [player.id, player]),
+    ).values(),
+  );
+  await enrichPlayers(uniquePlayers, cache);
+
+  const teamSnapshots = await mapLimit(baseSnapshots, 8, async (entry) => {
+    const merged = await mergeCachedBio(entry.players, cache);
     return {
-      team,
+      team: entry.team,
       players: merged.players.map(withExplicitMissingValues),
     };
   });
@@ -545,11 +558,14 @@ async function enrichPlayers(players: Player[], cache: CacheStore) {
   });
 
   const batches = chunkArray(stalePlayers, PEOPLE_BATCH_SIZE);
-  const refreshed = await mapLimit(batches, 8, async (batch) => {
-    const cards = await fetchPlayerCardBatch(batch.map((player) => player.id));
-    let usefulCards = 0;
+  const refreshed = await mapLimit(
+    batches,
+    PEOPLE_FETCH_CONCURRENCY,
+    async (batch) => {
+      const cards = await fetchPlayerCardBatch(batch.map((player) => player.id));
+      let usefulCards = 0;
 
-    const rows = batch.map((player) => {
+      const rows = batch.map((player) => {
         const current = metas.get(player.id);
         const card = cards.get(player.id) ?? { checked: false };
         const merged = emptyFallback(card, player);
@@ -573,10 +589,11 @@ async function enrichPlayers(players: Player[], cache: CacheStore) {
         };
       });
 
-    await writePlayerMetas(rows, cache);
+      await writePlayerMetas(rows, cache);
 
-    return usefulCards;
-  });
+      return usefulCards;
+    },
+  );
 
   return refreshed.reduce((sum, item) => sum + item, 0);
 }
@@ -779,26 +796,34 @@ async function readPlayerMetas(playerIds: number[], cache: CacheStore) {
     return rows;
   }
 
-  const placeholders = ids.map(() => "?").join(",");
-  const result = await cache.db
-    .prepare(
-      `SELECT player_id, draft, school, school_type, birth_city, birth_state, birth_country, fetched_at, expires_at, fail_count FROM player_meta_cache WHERE player_id IN (${placeholders})`,
-    )
-    .bind(...ids)
-    .all<{
-      player_id: number;
-      draft: string;
-      school: string;
-      school_type: string;
-      birth_city: string;
-      birth_state: string;
-      birth_country: string;
-      fetched_at: number;
-      expires_at: number;
-      fail_count: number;
-    }>();
+  type PlayerMetaResult = {
+    player_id: number;
+    draft: string;
+    school: string;
+    school_type: string;
+    birth_city: string;
+    birth_state: string;
+    birth_country: string;
+    fetched_at: number;
+    expires_at: number;
+    fail_count: number;
+  };
 
-  for (const row of result.results ?? []) {
+  const results = await mapLimit(
+    chunkArray(ids, META_READ_BATCH_SIZE),
+    8,
+    async (batch) => {
+      const placeholders = batch.map(() => "?").join(",");
+      return cache.db!
+        .prepare(
+          `SELECT player_id, draft, school, school_type, birth_city, birth_state, birth_country, fetched_at, expires_at, fail_count FROM player_meta_cache WHERE player_id IN (${placeholders})`,
+        )
+        .bind(...batch)
+        .all<PlayerMetaResult>();
+    },
+  );
+
+  for (const row of results.flatMap((result) => result.results ?? [])) {
     rows.set(row.player_id, {
       playerId: row.player_id,
       draft: cleanField(row.draft),

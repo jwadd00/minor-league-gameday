@@ -81,11 +81,13 @@ test("keeps game cards aligned to the modern horizontal spec", async () => {
 });
 
 test("preloads players from a scheduled daily snapshot without client warming", async () => {
-  const [client, route, worker, vite] = await Promise.all([
+  const [client, route, worker, vite, scheduler, schedulerConfig] = await Promise.all([
     readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scheduler/src/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scheduler/wrangler.jsonc", import.meta.url), "utf8"),
   ]);
 
   assert.match(client, /getJson<PlayerIndex>\(`\/api\/milb\?view=players&date=\$\{date\}`\)/);
@@ -98,4 +100,8 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.doesNotMatch(route, /if \(view === "warm"\)/);
   assert.match(worker, /async scheduled\(/);
   assert.match(vite, /crons:\s*\["0 10,14,18,22 \* \* \*"\]/);
+  assert.match(scheduler, /SITES_BYPASS_TOKEN/);
+  assert.match(scheduler, /OAI-Sites-Authorization/);
+  assert.match(scheduler, /x-gameday-cache-token/);
+  assert.match(schedulerConfig, /"crons":\s*\["0 10,14,18,22 \* \* \*"\]/);
 });
