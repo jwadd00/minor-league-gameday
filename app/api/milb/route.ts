@@ -642,9 +642,16 @@ async function fetchPlayerCardBatch(playerIds: number[], errors: string[] = []) 
         controller.signal,
       );
       for (const person of arrayOf(payload.people)) {
-        const normalized = normalizePersonCard(objectOf(person));
-        if (normalized) {
-          results.set(normalized.playerId, normalized.card);
+        try {
+          const normalized = normalizePersonCard(objectOf(person));
+          if (normalized) {
+            results.set(normalized.playerId, normalized.card);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          if (errors.length < 10) {
+            errors.push(`Player normalization failed: ${message}`);
+          }
         }
       }
       pendingIds = pendingIds.filter((playerId) => !results.has(playerId));
@@ -1185,7 +1192,8 @@ function extractEducation(person: Dict) {
   return { school: "", schoolType: "" };
 }
 
-function formatSchool(school: Dict) {
+function formatSchool(value: unknown) {
+  const school = objectOf(value);
   const name = stringOf(school.name);
   if (!name) {
     return "";

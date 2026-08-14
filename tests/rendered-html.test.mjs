@@ -100,6 +100,8 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.match(route, /const PEOPLE_BATCH_SIZE = 200/);
   assert.match(route, /const PEOPLE_FETCH_CONCURRENCY = 2/);
   assert.match(route, /pendingIds = pendingIds\.filter/);
+  assert.match(route, /function formatSchool\(value: unknown\)/);
+  assert.match(route, /Player normalization failed/);
   assert.doesNotMatch(route, /if \(view === "warm"\)/);
   assert.match(worker, /async scheduled\(/);
   assert.match(vite, /crons:\s*\["0 10,14,18,22 \* \* \*"\]/);
