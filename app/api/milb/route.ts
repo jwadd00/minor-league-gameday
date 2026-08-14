@@ -159,7 +159,7 @@ export async function POST(request: Request) {
 
     const configuredToken = (env as unknown as { CACHE_WARM_TOKEN?: string })
       .CACHE_WARM_TOKEN;
-    const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const suppliedToken = request.headers.get("x-gameday-cache-token");
     if (!configuredToken || suppliedToken !== configuredToken) {
       return Response.json({ error: "Unauthorized." }, { status: 401 });
     }

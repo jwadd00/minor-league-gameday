@@ -61,7 +61,7 @@ async function runScheduledSnapshot(env: Env, ctx: ExecutionContext) {
     `https://gameday-scout.internal/api/milb?view=materialize&date=${easternDate()}`,
     {
       method: "POST",
-      headers: { authorization: `Bearer ${env.CACHE_WARM_TOKEN}` },
+      headers: { "x-gameday-cache-token": env.CACHE_WARM_TOKEN },
     },
   );
   const response = await handler.fetch(request, env, ctx);
