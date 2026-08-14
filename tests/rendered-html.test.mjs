@@ -48,9 +48,10 @@ test("keeps the product styling and removes starter preview assets", async () =>
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(css, /--gold:\s*#dfc078/);
+  assert.match(css, /--bg:\s*#121212/);
   assert.match(css, /--blue:\s*#4de8ff/);
-  assert.match(css, /repeating-linear-gradient/);
+  assert.match(css, /--green:\s*#24f5c1/);
+  assert.match(css, /backdrop-filter:\s*blur/);
   assert.match(css, /\.game::after/);
   assert.match(css, /content:\s*"View roster"/);
   assert.match(css, /\.game-teams::before/);
@@ -59,4 +60,18 @@ test("keeps the product styling and removes starter preview assets", async () =>
   assert.doesNotMatch(layout, /codex-preview|_sites-preview|Starter Project/);
 
   await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
+});
+
+test("keeps game cards aligned to the modern horizontal spec", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(css, /\.game-list\s*{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(
+    css,
+    /\.game\s*{[^}]*grid-template-columns:\s*minmax\(112px,\s*0\.72fr\)\s*minmax\(320px,\s*2\.1fr\)\s*minmax\(210px,\s*1fr\)\s*132px;/s,
+  );
+  assert.match(css, /\.game::after\s*{[^}]*grid-column:\s*4;/s);
+  assert.match(css, /\.game-teams\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*46px\s*minmax\(0,\s*1fr\);/s);
+  assert.match(css, /\.game > span:not\(\.level\)\s*{[^}]*grid-column:\s*3;/s);
+  assert.match(css, /\.game small\s*{[^}]*grid-column:\s*1;/s);
 });
