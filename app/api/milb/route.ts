@@ -302,7 +302,7 @@ async function mergeCachedBio(
     const meta = metas.get(player.id);
     const bioStatus: BioStatus = !meta
       ? "missing"
-      : meta.expiresAt > now
+      : meta.expiresAt > now && hasBackgroundBio(meta, player)
         ? "fresh"
         : "stale";
 
@@ -337,14 +337,14 @@ async function enrichPlayers(players: Player[], cache: CacheStore) {
   const metas = await readPlayerMetas(players.map((player) => player.id), cache);
   const stalePlayers = players.filter((player) => {
     const meta = metas.get(player.id);
-    return !meta || meta.expiresAt <= now || !hasUsefulBio(meta);
+    return !meta || meta.expiresAt <= now || !hasBackgroundBio(meta, player);
   });
 
   const refreshed = await mapLimit(stalePlayers, 6, async (player) => {
     const current = metas.get(player.id);
     const card = await getOfficialPlayerCard(player.id);
     const merged = emptyFallback(card, player);
-    const useful = hasUsefulBio(merged);
+    const useful = hasBackgroundBio(card, player);
     const failCount = useful ? 0 : (current?.failCount ?? 0) + 1;
     await writePlayerMeta(
       {
@@ -559,12 +559,12 @@ async function readPlayerMetas(playerIds: number[], cache: CacheStore) {
   for (const row of result.results ?? []) {
     rows.set(row.player_id, {
       playerId: row.player_id,
-      draft: row.draft,
-      school: row.school,
-      schoolType: row.school_type,
-      birthCity: row.birth_city,
-      birthState: row.birth_state,
-      birthCountry: row.birth_country,
+      draft: cleanField(row.draft),
+      school: cleanField(row.school),
+      schoolType: cleanField(row.school_type),
+      birthCity: cleanField(row.birth_city),
+      birthState: cleanField(row.birth_state),
+      birthCountry: cleanField(row.birth_country),
       fetchedAt: row.fetched_at,
       expiresAt: row.expires_at,
       failCount: row.fail_count,
@@ -586,12 +586,12 @@ async function writePlayerMeta(row: PlayerMetaRow, cache: CacheStore) {
     )
     .bind(
       row.playerId,
-      row.draft,
-      row.school,
-      row.schoolType,
-      row.birthCity,
-      row.birthState,
-      row.birthCountry,
+      cleanField(row.draft),
+      cleanField(row.school),
+      cleanField(row.schoolType),
+      cleanField(row.birthCity),
+      cleanField(row.birthState),
+      cleanField(row.birthCountry),
       row.fetchedAt,
       row.expiresAt,
       row.failCount,
@@ -684,6 +684,7 @@ function extractCardDetails(html: string): Partial<PlayerCard> {
     "College",
     "High School",
     "Relationship",
+    "Relationship(s)",
     "Follow",
     "Latest Transactions",
     "Stats",
@@ -693,6 +694,7 @@ function extractCardDetails(html: string): Partial<PlayerCard> {
   const college = fieldAfter(text, "College", [
     "High School",
     "Relationship",
+    "Relationship(s)",
     "Follow",
     "Latest Transactions",
     "Stats",
@@ -702,6 +704,7 @@ function extractCardDetails(html: string): Partial<PlayerCard> {
   const highSchool = fieldAfter(text, "High School", [
     "College",
     "Relationship",
+    "Relationship(s)",
     "Follow",
     "Latest Transactions",
     "Stats",
@@ -713,6 +716,7 @@ function extractCardDetails(html: string): Partial<PlayerCard> {
     "College",
     "High School",
     "Relationship",
+    "Relationship(s)",
     "Follow",
     "2026 Stats",
     "MiLB Career Stats",
@@ -764,6 +768,8 @@ function cleanField(value: string) {
   return value
     .replace(/\s+\d{4}\s+Stats\b.*$/i, "")
     .replace(/\s+MiLB\s+Career\s+Stats\b.*$/i, "")
+    .replace(/\s+Relationship(?:\(s\))?\b.*$/i, "")
+    .replace(/\s+Follow\b.*$/i, "")
     .replace(/\s+\|\s+.*$/, "")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -912,6 +918,17 @@ function hasUsefulBio(card: Partial<PlayerCard>) {
       card.birthCity ||
       card.birthState ||
       card.birthCountry,
+  );
+}
+
+function hasBackgroundBio(card: Partial<PlayerCard>, player: Player) {
+  return Boolean(
+    card.draft ||
+      card.school ||
+      card.schoolType ||
+      player.draft ||
+      player.school ||
+      player.schoolType,
   );
 }
 

@@ -110,10 +110,23 @@ main::after {
   text-transform: uppercase;
 }
 
-.topnav span {
+.topnav button {
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
   color: var(--muted);
+  padding: 0 12px;
   font-size: 0.82rem;
   font-weight: 800;
+  cursor: pointer;
+}
+
+.topnav button:hover,
+.topnav button.active {
+  border-color: rgba(32, 242, 154, 0.36);
+  background: rgba(32, 242, 154, 0.1);
+  color: #ffffff;
 }
 
 .eyebrow {
@@ -164,8 +177,7 @@ h2 {
   padding: 12px;
 }
 
-.date-control button,
-.tabs button {
+.date-control button {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
@@ -179,8 +191,7 @@ h2 {
   font-weight: 900;
 }
 
-.date-control button:hover,
-.tabs button:hover {
+.date-control button:hover {
   border-color: var(--blue);
   box-shadow: 0 0 18px rgba(32, 199, 255, 0.24);
 }
@@ -238,30 +249,6 @@ select:focus {
   padding: 0 0 42px;
 }
 
-.tabs {
-  display: inline-grid;
-  grid-template-columns: repeat(2, minmax(148px, 1fr));
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(17, 27, 41, 0.8);
-}
-
-.tabs button {
-  min-height: 46px;
-  border-radius: 6px;
-  color: var(--muted);
-  font-weight: 900;
-}
-
-.tabs button.active {
-  border-color: rgba(32, 242, 154, 0.6);
-  background: linear-gradient(135deg, rgba(32, 242, 154, 0.22), rgba(32, 199, 255, 0.12));
-  color: #ffffff;
-  box-shadow: inset 0 0 0 1px rgba(32, 242, 154, 0.26);
-}
-
 .games-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -305,7 +292,7 @@ select:focus {
 }
 
 .panel-heading > span,
-.summary-strip span {
+.summary-strip > span {
   border: 1px solid rgba(32, 242, 154, 0.32);
   border-radius: 999px;
   background: rgba(32, 242, 154, 0.1);
@@ -432,10 +419,59 @@ select:focus {
 
 .game strong {
   display: block;
-  min-height: 44px;
   color: #ffffff;
   font-size: 1rem;
   line-height: 1.25;
+}
+
+.team-logo {
+  position: relative;
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 0.62rem;
+  font-weight: 900;
+}
+
+.team-logo img {
+  position: absolute;
+  inset: 3px;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  object-fit: contain;
+}
+
+.team-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-name > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-teams {
+  display: grid;
+  gap: 5px;
+  padding-right: 76px;
+}
+
+.game-teams .versus {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .game span:not(.level),
@@ -502,6 +538,17 @@ table a:hover {
   flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 14px;
+}
+
+.summary-strip .team-name {
+  vertical-align: middle;
+}
+
+.summary-strip .team-logo,
+td .team-logo {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
 }
 
 .cache-note {
@@ -703,10 +750,6 @@ td span {
 @media (max-width: 620px) {
   h1 {
     font-size: 2.7rem;
-  }
-
-  .tabs {
-    width: 100%;
   }
 
   .panel-heading,

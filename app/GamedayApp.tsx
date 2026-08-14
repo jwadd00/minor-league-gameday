@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Game = {
   gamePk: number;
@@ -143,6 +143,10 @@ function teamLine(game: Game) {
   }`;
 }
 
+function teamLogoUrl(teamId: number) {
+  return `https://www.milb.com/images/logos/team/current/${teamId}.svg`;
+}
+
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) =>
     a.localeCompare(b),
@@ -192,6 +196,9 @@ function comparePlayers(a: Player, b: Player, sort: SortState) {
 }
 
 export function GamedayApp() {
+  const gamesRef = useRef<HTMLDivElement | null>(null);
+  const detailRef = useRef<HTMLElement | null>(null);
+  const playersRef = useRef<HTMLElement | null>(null);
   const [activeTab, setActiveTab] = useState<"games" | "players">("games");
   const [date, setDate] = useState(todayValue);
   const [games, setGames] = useState<ApiState<Game[]>>({ status: "idle" });
@@ -328,6 +335,49 @@ export function GamedayApp() {
   const selectedGame =
     games.data?.find((game) => game.gamePk === selectedGamePk) ?? null;
 
+  const selectedGamePlayers = useMemo(
+    () => gameDetail.data?.teams.flatMap((entry) => entry.players) ?? [],
+    [gameDetail.data],
+  );
+
+  const playersForPage = useMemo(() => {
+    const rows = new Map<string, Player>();
+    for (const player of selectedGamePlayers) {
+      rows.set(`${player.teamId}-${player.id}`, player);
+    }
+    for (const player of allPlayers.data ?? []) {
+      rows.set(`${player.teamId}-${player.id}`, player);
+    }
+    return Array.from(rows.values());
+  }, [allPlayers.data, selectedGamePlayers]);
+
+  function scrollTo(ref: { current: Element | null }) {
+    setTimeout(() => {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+
+  function showGames() {
+    setActiveTab("games");
+    scrollTo(gamesRef);
+  }
+
+  function showRoster() {
+    setActiveTab("games");
+    scrollTo(detailRef);
+  }
+
+  function showPlayers() {
+    setActiveTab("players");
+    scrollTo(playersRef);
+  }
+
+  function selectGame(gamePk: number) {
+    setActiveTab("games");
+    setSelectedGamePk(gamePk);
+    scrollTo(detailRef);
+  }
+
   const filteredGames = useMemo(() => {
     const normalizedQuery = gameQuery.trim().toLowerCase();
 
@@ -376,7 +426,7 @@ export function GamedayApp() {
   }, [games.data]);
 
   const playerRows = useMemo(() => {
-    const rows = allPlayers.data ?? [];
+    const rows = playersForPage;
     const normalizedQuery = query.trim().toLowerCase();
 
     return rows.filter((player) => {
@@ -400,25 +450,39 @@ export function GamedayApp() {
         (!state || player.birthState === state)
       );
     });
-  }, [allPlayers.data, city, query, school, state]);
+  }, [city, playersForPage, query, school, state]);
 
   const filterOptions = useMemo(() => {
-    const rows = allPlayers.data ?? [];
+    const rows = playersForPage;
     return {
       schools: uniqueSorted(rows.map((player) => player.school)),
       cities: uniqueSorted(rows.map((player) => player.birthCity)),
       states: uniqueSorted(rows.map((player) => player.birthState)),
     };
-  }, [allPlayers.data]);
+  }, [playersForPage]);
 
   return (
     <main className="min-h-screen bg-[#07111c] text-[#eaf7ff]">
       <section className="topbar">
         <nav className="topnav" aria-label="Site">
           <strong>Gameday Scout</strong>
-          <span>Games</span>
-          <span>Rosters</span>
-          <span>Players</span>
+          <button
+            type="button"
+            className={activeTab === "games" ? "active" : ""}
+            onClick={showGames}
+          >
+            Games
+          </button>
+          <button type="button" onClick={showRoster}>
+            Rosters
+          </button>
+          <button
+            type="button"
+            className={activeTab === "players" ? "active" : ""}
+            onClick={showPlayers}
+          >
+            Players
+          </button>
         </nav>
         <div>
           <p className="eyebrow">Live minor league roster finder</p>
@@ -467,25 +531,8 @@ export function GamedayApp() {
       </section>
 
       <section className="workspace">
-        <nav className="tabs" aria-label="Primary views">
-          <button
-            type="button"
-            className={activeTab === "games" ? "active" : ""}
-            onClick={() => setActiveTab("games")}
-          >
-            Today&apos;s Games
-          </button>
-          <button
-            type="button"
-            className={activeTab === "players" ? "active" : ""}
-            onClick={() => setActiveTab("players")}
-          >
-            Players
-          </button>
-        </nav>
-
         {activeTab === "games" ? (
-          <div className="games-grid">
+          <div className="games-grid" ref={gamesRef}>
             <aside className="games-panel">
               <div className="panel-heading">
                 <div>
@@ -551,10 +598,10 @@ export function GamedayApp() {
                     type="button"
                     key={game.gamePk}
                     className={game.gamePk === selectedGamePk ? "game active" : "game"}
-                    onClick={() => setSelectedGamePk(game.gamePk)}
+                    onClick={() => selectGame(game.gamePk)}
                   >
                     <span className="level">{game.level}</span>
-                    <strong>{teamLine(game)}</strong>
+                    <GameTeams game={game} />
                     <span>
                       {formatGameTime(game.gameDate)} · {game.venue}
                     </span>
@@ -564,7 +611,7 @@ export function GamedayApp() {
               </div>
             </aside>
 
-            <section className="detail-panel">
+            <section className="detail-panel" ref={detailRef}>
               {selectedGame ? (
                 <div className="detail-head">
                   <div>
@@ -606,7 +653,7 @@ export function GamedayApp() {
             </section>
           </div>
         ) : (
-          <section className="players-panel">
+          <section className="players-panel" ref={playersRef}>
             <div className="panel-heading wide">
               <div>
                 <p className="eyebrow">Player finder</p>
@@ -666,7 +713,13 @@ export function GamedayApp() {
             </div>
 
             {allPlayers.status === "loading" ? (
-              <LoadingBlock label="Building the day-wide player index" />
+              <LoadingBlock
+                label={
+                  playerRows.length > 0
+                    ? "Adding the day-wide player index"
+                    : "Building the day-wide player index"
+                }
+              />
             ) : null}
 
             {allPlayers.status === "error" ? (
@@ -676,7 +729,7 @@ export function GamedayApp() {
               />
             ) : null}
 
-            {allPlayers.status === "ready" ? (
+            {playerRows.length > 0 ? (
               <PlayerTableEnhanced players={playerRows} />
             ) : null}
           </section>
@@ -692,6 +745,50 @@ function LoadingBlock({ label }: { label: string }) {
       <span />
       {label}
     </div>
+  );
+}
+
+function TeamLogo({ team }: { team: TeamSummary | { id: number; name: string } }) {
+  return (
+    <span className="team-logo" aria-hidden="true">
+      <img
+        src={teamLogoUrl(team.id)}
+        alt=""
+        loading="lazy"
+        onError={(event) => {
+          event.currentTarget.style.display = "none";
+        }}
+      />
+      <span>{team.name.slice(0, 2).toUpperCase()}</span>
+    </span>
+  );
+}
+
+function TeamName({ team }: { team: TeamSummary }) {
+  return (
+    <span className="team-name">
+      <TeamLogo team={team} />
+      <span>{team.shortName || team.name}</span>
+    </span>
+  );
+}
+
+function PlayerTeamName({ player }: { player: Player }) {
+  return (
+    <span className="team-name">
+      <TeamLogo team={{ id: player.teamId, name: player.teamName }} />
+      <span>{player.teamName}</span>
+    </span>
+  );
+}
+
+function GameTeams({ game }: { game: Game }) {
+  return (
+    <strong className="game-teams">
+      <TeamName team={game.away} />
+      <span className="versus">at</span>
+      <TeamName team={game.home} />
+    </strong>
   );
 }
 
@@ -712,7 +809,7 @@ function RosterTables({ detail }: { detail: GameDetail }) {
       <div className="summary-strip">
         {detail.teams.map((entry) => (
           <span key={entry.team.id}>
-            <strong>{entry.players.length}</strong> {entry.team.shortName}
+            <strong>{entry.players.length}</strong> <TeamName team={entry.team} />
           </span>
         ))}
       </div>
@@ -981,7 +1078,9 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
                     </a>
                     <span>{player.status}</span>
                   </td>
-                  <td>{player.teamName}</td>
+                  <td>
+                    <PlayerTeamName player={player} />
+                  </td>
                   <td>{player.position || "-"}</td>
                   <td>{player.number || "-"}</td>
                   <td>{player.draft || "-"}</td>
