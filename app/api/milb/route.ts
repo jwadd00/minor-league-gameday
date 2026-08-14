@@ -5,10 +5,10 @@ export const dynamic = "force-dynamic";
 const API_BASE = "https://statsapi.mlb.com/api/v1";
 const MINOR_SPORT_IDS = "11,12,13,14,16";
 const CARD_TIMEOUT_MS = 20_000;
-const PEOPLE_BATCH_SIZE = 25;
-const PEOPLE_FETCH_CONCURRENCY = 8;
+const PEOPLE_BATCH_SIZE = 200;
+const PEOPLE_FETCH_CONCURRENCY = 2;
 const META_READ_BATCH_SIZE = 100;
-const CARD_FETCH_ATTEMPTS = 3;
+const CARD_FETCH_ATTEMPTS = 4;
 const SCHEDULE_TTL_MS = 3 * 60 * 1000;
 const ROSTER_TTL_MS = 15 * 60 * 1000;
 const PLAYER_META_TTL_MS = 21 * 24 * 60 * 60 * 1000;
@@ -618,14 +618,16 @@ async function fetchPlayerCardBatch(playerIds: number[]) {
     return new Map<number, FetchedPlayerCard>();
   }
 
+  const results = new Map<number, FetchedPlayerCard>();
+  let pendingIds = uniqueIds;
+
   for (let attempt = 1; attempt <= CARD_FETCH_ATTEMPTS; attempt += 1) {
-    const results = new Map<number, FetchedPlayerCard>();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), CARD_TIMEOUT_MS);
 
     try {
       const payload = await statsApi(
-        `/people?personIds=${uniqueIds.join(",")}&hydrate=draft,education`,
+        `/people?personIds=${pendingIds.join(",")}&hydrate=draft,education`,
         controller.signal,
       );
       for (const person of arrayOf(payload.people)) {
@@ -634,19 +636,22 @@ async function fetchPlayerCardBatch(playerIds: number[]) {
           results.set(normalized.playerId, normalized.card);
         }
       }
-      if (results.size > 0 || attempt === CARD_FETCH_ATTEMPTS) {
+      pendingIds = pendingIds.filter((playerId) => !results.has(playerId));
+      if (pendingIds.length === 0) {
         return results;
       }
     } catch {
-      if (attempt === CARD_FETCH_ATTEMPTS) {
-        return results;
-      }
+      // A later attempt retries only the IDs that have not been verified yet.
     } finally {
       clearTimeout(timeout);
     }
+
+    if (attempt < CARD_FETCH_ATTEMPTS) {
+      await delay(attempt * 500);
+    }
   }
 
-  return new Map<number, FetchedPlayerCard>();
+  return results;
 }
 
 async function statsApi(path: string, signal?: AbortSignal): Promise<Dict> {
@@ -1350,6 +1355,10 @@ function chunkArray<T>(items: T[], size: number) {
     chunks.push(items.slice(index, index + size));
   }
   return chunks;
+}
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function objectOf(value: unknown): Dict {
