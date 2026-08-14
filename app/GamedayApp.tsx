@@ -55,6 +55,12 @@ type GameDetail = {
   cacheInfo?: CacheInfo;
 };
 
+type PlayerIndex = {
+  players: Player[];
+  teamCount: number;
+  cacheInfo?: CacheInfo;
+};
+
 type ApiState<T> = {
   status: "idle" | "loading" | "ready" | "error";
   data?: T;
@@ -206,9 +212,12 @@ export function GamedayApp() {
   const [gameDetail, setGameDetail] = useState<ApiState<GameDetail>>({
     status: "idle",
   });
-  const [allPlayers, setAllPlayers] = useState<ApiState<Player[]>>({
+  const [allPlayers, setAllPlayers] = useState<ApiState<PlayerIndex>>({
     status: "idle",
   });
+  const [playerWarmOffset, setPlayerWarmOffset] = useState(0);
+  const [playerWarmDone, setPlayerWarmDone] = useState(false);
+  const [isWarmingPlayers, setIsWarmingPlayers] = useState(false);
   const [query, setQuery] = useState("");
   const [school, setSchool] = useState("");
   const [city, setCity] = useState("");
@@ -224,6 +233,9 @@ export function GamedayApp() {
     setSelectedGamePk(null);
     setGameDetail({ status: "idle" });
     setAllPlayers({ status: "idle" });
+    setPlayerWarmOffset(0);
+    setPlayerWarmDone(false);
+    setIsWarmingPlayers(false);
     setEnrichedGameKeys([]);
     setIsEnriching(false);
 
@@ -315,10 +327,10 @@ export function GamedayApp() {
     let cancelled = false;
     setAllPlayers({ status: "loading" });
 
-    getJson<{ players: Player[] }>(`/api/milb?view=players&date=${date}`)
+    getJson<PlayerIndex>(`/api/milb?view=players&date=${date}`)
       .then((payload) => {
         if (!cancelled) {
-          setAllPlayers({ status: "ready", data: payload.players });
+          setAllPlayers({ status: "ready", data: payload });
         }
       })
       .catch((error: Error) => {
@@ -332,24 +344,71 @@ export function GamedayApp() {
     };
   }, [activeTab, allPlayers.status, date]);
 
+  useEffect(() => {
+    if (
+      activeTab !== "players" ||
+      allPlayers.status !== "ready" ||
+      playerWarmDone ||
+      isWarmingPlayers
+    ) {
+      return;
+    }
+
+    const pending =
+      (allPlayers.data?.cacheInfo?.missingBio ?? 0) +
+      (allPlayers.data?.cacheInfo?.staleBio ?? 0);
+
+    if (pending === 0) {
+      setPlayerWarmDone(true);
+      return;
+    }
+
+    let cancelled = false;
+    setIsWarmingPlayers(true);
+
+    getJson<{ nextOffset: number | null }>(
+      `/api/milb?view=warm&date=${date}&scope=all&offset=${playerWarmOffset}&limitTeams=6`,
+    )
+      .then(async (warmResult) => {
+        const payload = await getJson<PlayerIndex>(`/api/milb?view=players&date=${date}`);
+        if (!cancelled) {
+          setAllPlayers({ status: "ready", data: payload });
+          setPlayerWarmOffset(warmResult.nextOffset ?? 0);
+          setPlayerWarmDone(warmResult.nextOffset === null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPlayerWarmDone(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsWarmingPlayers(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    allPlayers.data?.cacheInfo?.missingBio,
+    allPlayers.data?.cacheInfo?.staleBio,
+    allPlayers.status,
+    date,
+    isWarmingPlayers,
+    playerWarmDone,
+    playerWarmOffset,
+  ]);
+
   const selectedGame =
     games.data?.find((game) => game.gamePk === selectedGamePk) ?? null;
 
-  const selectedGamePlayers = useMemo(
-    () => gameDetail.data?.teams.flatMap((entry) => entry.players) ?? [],
-    [gameDetail.data],
-  );
-
-  const playersForPage = useMemo(() => {
-    const rows = new Map<string, Player>();
-    for (const player of selectedGamePlayers) {
-      rows.set(`${player.teamId}-${player.id}`, player);
-    }
-    for (const player of allPlayers.data ?? []) {
-      rows.set(`${player.teamId}-${player.id}`, player);
-    }
-    return Array.from(rows.values());
-  }, [allPlayers.data, selectedGamePlayers]);
+  const playersForPage = allPlayers.data?.players ?? [];
+  const playerCacheInfo = allPlayers.data?.cacheInfo;
+  const pendingPlayerBios =
+    (playerCacheInfo?.missingBio ?? 0) + (playerCacheInfo?.staleBio ?? 0);
 
   function scrollTo(ref: { current: Element | null }) {
     setTimeout(() => {
@@ -360,11 +419,6 @@ export function GamedayApp() {
   function showGames() {
     setActiveTab("games");
     scrollTo(gamesRef);
-  }
-
-  function showRoster() {
-    setActiveTab("games");
-    scrollTo(detailRef);
   }
 
   function showPlayers() {
@@ -472,9 +526,6 @@ export function GamedayApp() {
             onClick={showGames}
           >
             Games
-          </button>
-          <button type="button" onClick={showRoster}>
-            Rosters
           </button>
           <button
             type="button"
@@ -659,7 +710,9 @@ export function GamedayApp() {
                 <p className="eyebrow">Player finder</p>
                 <h2>Players Taking The Field {labelForDate(date)}</h2>
               </div>
-              <span>{playerRows.length} shown</span>
+              <span>
+                {playerRows.length}/{playersForPage.length} shown
+              </span>
             </div>
 
             <div className="filters">
@@ -712,15 +765,17 @@ export function GamedayApp() {
               </label>
             </div>
 
-            {allPlayers.status === "loading" && playerRows.length === 0 ? (
-              <LoadingBlock
-                label="Building the day-wide player index"
-              />
+            {allPlayers.status === "loading" ? (
+              <div className="inline-status player-status" role="status" aria-live="polite">
+                Loading the day-wide player table
+              </div>
             ) : null}
 
-            {allPlayers.status === "loading" && playerRows.length > 0 ? (
-              <div className="inline-status" role="status" aria-live="polite">
-                Adding the day-wide player index
+            {allPlayers.status === "ready" && pendingPlayerBios > 0 ? (
+              <div className="inline-status player-status" role="status" aria-live="polite">
+                {isWarmingPlayers
+                  ? `Warming draft and school data for ${pendingPlayerBios} players`
+                  : `${pendingPlayerBios} player cards queued for draft and school data`}
               </div>
             ) : null}
 

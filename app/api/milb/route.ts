@@ -137,8 +137,11 @@ export async function GET(request: Request) {
         24,
         Math.max(1, Number(url.searchParams.get("limitTeams")) || 12),
       );
+      const scope = url.searchParams.get("scope") === "all" ? "all" : "fullSeason";
       const games = await getGames(date, cache);
-      const teams = uniqueTeams(games.filter((game) => !isComplexLeagueGame(game)));
+      const teams = uniqueTeams(
+        scope === "all" ? games : games.filter((game) => !isComplexLeagueGame(game)),
+      );
       const batch = teams.slice(offset, offset + limit);
       const results = await mapLimit(batch, 4, async (team) => {
         const roster = await getRoster(team, date, cache, false);
@@ -148,6 +151,7 @@ export async function GET(request: Request) {
 
       return Response.json({
         date,
+        scope,
         teams: results.length,
         totalTeams: teams.length,
         nextOffset: offset + results.length < teams.length ? offset + results.length : null,

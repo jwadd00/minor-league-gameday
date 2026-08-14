@@ -147,7 +147,7 @@ h2 {
 h1 {
   max-width: 780px;
   color: #ffffff;
-  font-size: clamp(2.35rem, 4.6vw, 4rem);
+  font-size: clamp(2.1rem, 3.8vw, 3.35rem);
   font-weight: 900;
   line-height: 0.92;
 }
@@ -161,8 +161,8 @@ h2 {
   max-width: 740px;
   margin: 12px 0 0;
   color: #b9c9d5;
-  font-size: 1.02rem;
-  line-height: 1.55;
+  font-size: 0.96rem;
+  line-height: 1.45;
 }
 
 .date-control {
@@ -187,8 +187,21 @@ h2 {
 .date-control button {
   min-height: 48px;
   border-radius: 8px;
-  font-size: 1.35rem;
+  font-size: 0;
   font-weight: 900;
+}
+
+.date-control button::before {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.date-control button[aria-label="Previous day"]::before {
+  content: "<";
+}
+
+.date-control button[aria-label="Next day"]::before {
+  content: ">";
 }
 
 .date-control button:hover {
@@ -379,19 +392,6 @@ select:focus {
   cursor: pointer;
 }
 
-.game::after {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  content: "View roster";
-  border-radius: 6px;
-  background: var(--green);
-  color: #061018;
-  padding: 6px 9px;
-  font-size: 0.72rem;
-  font-weight: 900;
-}
-
 .game:hover,
 .game.active {
   border-color: var(--blue);
@@ -463,14 +463,21 @@ select:focus {
 
 .game-teams {
   display: grid;
-  gap: 5px;
-  padding-right: 76px;
+  gap: 7px;
 }
 
 .game-teams .versus {
+  display: inline-flex;
+  width: fit-content;
+  margin-left: 38px;
+  border: 1px solid rgba(134, 163, 184, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
   color: var(--muted);
+  padding: 2px 7px;
   font-size: 0.68rem;
   font-weight: 800;
+  line-height: 1;
   text-transform: uppercase;
 }
 
@@ -526,6 +533,10 @@ table a:hover {
   padding: 7px 11px;
   font-size: 0.82rem;
   font-weight: 900;
+}
+
+.player-status {
+  margin: 0 0 12px;
 }
 
 .inline-status::before {
