@@ -48,7 +48,7 @@ test("keeps the product styling and removes starter preview assets", async () =>
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(css, /--gold:\s*#d9b96a/);
+  assert.match(css, /--gold:\s*#dfc078/);
   assert.match(css, /--blue:\s*#4de8ff/);
   assert.match(css, /repeating-linear-gradient/);
   assert.match(css, /\.game::after/);

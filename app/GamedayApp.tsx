@@ -320,7 +320,7 @@ export function GamedayApp() {
   }, [date, enrichedGameKeys, gameDetail, selectedGamePk]);
 
   useEffect(() => {
-    if (activeTab !== "players" || allPlayers.status !== "idle") {
+    if (games.status !== "ready" || allPlayers.status !== "idle") {
       return;
     }
 
@@ -342,11 +342,10 @@ export function GamedayApp() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, allPlayers.status, date]);
+  }, [allPlayers.status, date, games.status]);
 
   useEffect(() => {
     if (
-      activeTab !== "players" ||
       allPlayers.status !== "ready" ||
       playerWarmDone ||
       isWarmingPlayers
@@ -367,7 +366,7 @@ export function GamedayApp() {
     setIsWarmingPlayers(true);
 
     getJson<{ nextOffset: number | null }>(
-      `/api/milb?view=warm&date=${date}&scope=all&offset=${playerWarmOffset}&limitTeams=6`,
+      `/api/milb?view=warm&date=${date}&scope=all&offset=${playerWarmOffset}&limitTeams=24`,
     )
       .then(async (warmResult) => {
         const payload = await getJson<PlayerIndex>(`/api/milb?view=players&date=${date}`);
@@ -392,7 +391,6 @@ export function GamedayApp() {
       cancelled = true;
     };
   }, [
-    activeTab,
     allPlayers.data?.cacheInfo?.missingBio,
     allPlayers.data?.cacheInfo?.staleBio,
     allPlayers.status,

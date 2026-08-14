@@ -5,7 +5,8 @@ export const dynamic = "force-dynamic";
 
 const API_BASE = "https://statsapi.mlb.com/api/v1";
 const MINOR_SPORT_IDS = "11,12,13,14,16";
-const CARD_TIMEOUT_MS = 3500;
+const CARD_TIMEOUT_MS = 8000;
+const PEOPLE_BATCH_SIZE = 75;
 const SCHEDULE_TTL_MS = 3 * 60 * 1000;
 const ROSTER_TTL_MS = 15 * 60 * 1000;
 const PLAYER_META_TTL_MS = 21 * 24 * 60 * 60 * 1000;
@@ -55,6 +56,10 @@ type PlayerCard = Pick<
   "draft" | "school" | "schoolType" | "birthCity" | "birthState" | "birthCountry"
 >;
 
+type FetchedPlayerCard = Partial<PlayerCard> & {
+  checked: boolean;
+};
+
 type CacheInfo = {
   totalPlayers: number;
   freshBio: number;
@@ -80,7 +85,7 @@ type CacheStore = {
   db?: D1Database;
 };
 
-const cardCache = new Map<number, Promise<Partial<PlayerCard>>>();
+const cardCache = new Map<number, Promise<FetchedPlayerCard>>();
 const memorySchedule = new Map<string, CacheEntry<Game[]>>();
 const memoryRosters = new Map<string, CacheEntry<Player[]>>();
 const memoryPlayers = new Map<number, PlayerMetaRow>();
@@ -123,18 +128,25 @@ export async function GET(request: Request) {
       const players = rosters
         .flatMap((entry) => entry.players)
         .sort((a, b) => a.name.localeCompare(b.name));
+      const cacheInfo = summarizePlayers(players);
+
+      if (shouldRefreshBio(cacheInfo)) {
+        getRequestExecutionContext()?.waitUntil(
+          enrichPlayers(players, cache).catch(() => undefined),
+        );
+      }
 
       return Response.json({
         players,
         teamCount: teams.length,
-        cacheInfo: summarizePlayers(players),
+        cacheInfo,
       });
     }
 
     if (view === "warm") {
       const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
       const limit = Math.min(
-        24,
+        48,
         Math.max(1, Number(url.searchParams.get("limitTeams")) || 12),
       );
       const scope = url.searchParams.get("scope") === "all" ? "all" : "fullSeason";
@@ -306,7 +318,9 @@ async function mergeCachedBio(
     const meta = metas.get(player.id);
     const bioStatus: BioStatus = !meta
       ? "missing"
-      : meta.expiresAt > now && hasBackgroundBio(meta, player)
+      : isFailedMeta(meta) || isUnverifiedBackgroundMeta(meta)
+        ? "stale"
+        : meta.expiresAt > now
         ? "fresh"
         : "stale";
 
@@ -341,71 +355,103 @@ async function enrichPlayers(players: Player[], cache: CacheStore) {
   const metas = await readPlayerMetas(players.map((player) => player.id), cache);
   const stalePlayers = players.filter((player) => {
     const meta = metas.get(player.id);
-    return !meta || meta.expiresAt <= now || !hasBackgroundBio(meta, player);
+    return (
+      !meta ||
+      meta.expiresAt <= now ||
+      isFailedMeta(meta) ||
+      isUnverifiedBackgroundMeta(meta)
+    );
   });
 
-  const refreshed = await mapLimit(stalePlayers, 6, async (player) => {
-    const current = metas.get(player.id);
-    const card = await getOfficialPlayerCard(player.id);
-    const merged = emptyFallback(card, player);
-    const useful = hasBackgroundBio(card, player);
-    const failCount = useful ? 0 : (current?.failCount ?? 0) + 1;
-    await writePlayerMeta(
-      {
-        playerId: player.id,
-        ...merged,
-        fetchedAt: now,
-        expiresAt: now + (useful ? PLAYER_META_TTL_MS : FAILED_CARD_TTL_MS),
-        failCount,
-      },
-      cache,
+  const batches = chunkArray(stalePlayers, PEOPLE_BATCH_SIZE);
+  const refreshed = await mapLimit(batches, 4, async (batch) => {
+    const cards = await fetchPlayerCardBatch(batch.map((player) => player.id));
+    let usefulCards = 0;
+
+    await Promise.all(
+      batch.map(async (player) => {
+        const current = metas.get(player.id);
+        const card = cards.get(player.id) ?? { checked: false };
+        const merged = emptyFallback(card, player);
+        const hasDraftOrSchool = hasBackgroundBio(merged, player);
+        const checked = card.checked;
+
+        if (hasDraftOrSchool) {
+          usefulCards += 1;
+        }
+
+        await writePlayerMeta(
+          {
+            playerId: player.id,
+            ...merged,
+            fetchedAt: now,
+            expiresAt: now + (checked ? PLAYER_META_TTL_MS : FAILED_CARD_TTL_MS),
+            failCount: checked
+              ? hasDraftOrSchool
+                ? 0
+                : -1
+              : Math.max(0, current?.failCount ?? 0) + 1,
+          },
+          cache,
+        );
+      }),
     );
-    return useful ? 1 : 0;
+
+    return usefulCards;
   });
 
   return refreshed.reduce((sum, item) => sum + item, 0);
 }
 
-async function getOfficialPlayerCard(playerId: number): Promise<Partial<PlayerCard>> {
+async function getOfficialPlayerCard(playerId: number): Promise<FetchedPlayerCard> {
   const cached = cardCache.get(playerId);
   if (cached) {
     return cached;
   }
 
-  const promise = fetchPlayerCard(playerId);
+  const promise = fetchPlayerCardBatch([playerId]).then(
+    (cards) => cards.get(playerId) ?? { checked: false },
+  );
   cardCache.set(playerId, promise);
   return promise;
 }
 
-async function fetchPlayerCard(playerId: number): Promise<Partial<PlayerCard>> {
+async function fetchPlayerCardBatch(playerIds: number[]) {
+  const uniqueIds = Array.from(new Set(playerIds)).filter(Number.isFinite);
+  const results = new Map<number, FetchedPlayerCard>();
+
+  if (uniqueIds.length === 0) {
+    return results;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CARD_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`https://www.milb.com/player/${playerId}`, {
-      headers: {
-        accept: "text/html,application/xhtml+xml",
-        "user-agent": "Minor League Gameday Scout",
-      },
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      return {};
+    const payload = await statsApi(
+      `/people?personIds=${uniqueIds.join(",")}&hydrate=draft,education`,
+      controller.signal,
+    );
+    for (const person of arrayOf(payload.people)) {
+      const normalized = normalizePersonCard(objectOf(person));
+      if (normalized) {
+        results.set(normalized.playerId, normalized.card);
+      }
     }
-
-    return extractCardDetails(await response.text());
   } catch {
-    return {};
+    return results;
   } finally {
     clearTimeout(timeout);
   }
+
+  return results;
 }
 
-async function statsApi(path: string): Promise<Dict> {
+async function statsApi(path: string, signal?: AbortSignal): Promise<Dict> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { accept: "application/json" },
     cache: "no-store",
+    signal,
   });
 
   if (!response.ok) {
@@ -682,6 +728,59 @@ function normalizePlayer(entry: Dict, team: TeamSummary): Player | null {
   };
 }
 
+function normalizePersonCard(
+  person: Dict,
+): { playerId: number; card: FetchedPlayerCard } | null {
+  const playerId = numberOf(person.id);
+  if (!playerId) {
+    return null;
+  }
+
+  const draftEntry = latestDraftEntry(person);
+  const education = extractEducation(person);
+  const draftSchool = formatSchool(objectOf(draftEntry.school));
+  const draft = formatDraft(draftEntry, person);
+  const school = draftSchool || education.school;
+
+  return {
+    playerId,
+    card: {
+      checked: true,
+      draft,
+      school,
+      schoolType: draftSchool
+        ? schoolTypeFromDraftSchool(objectOf(draftEntry.school))
+        : education.schoolType,
+      birthCity: stringOf(person.birthCity),
+      birthState: stringOf(person.birthStateProvince),
+      birthCountry: stringOf(person.birthCountry),
+    },
+  };
+}
+
+function latestDraftEntry(person: Dict) {
+  return arrayOrSingle(person.drafts)
+    .map(objectOf)
+    .sort((a, b) => stringOf(b.year).localeCompare(stringOf(a.year)))[0] ?? {};
+}
+
+function formatDraft(draft: Dict, person: Dict) {
+  const year = stringOf(draft.year) || stringOf(person.draftYear);
+  const team = stringOf(objectOf(draft.team).name);
+  const round = stringOf(draft.pickRound);
+  const pick = stringOf(draft.displayPickNumber) || stringOf(draft.pickNumber);
+
+  if (year && team && round && pick) {
+    return `${year}, ${team}, Round: ${round}, Overall Pick: ${pick}`;
+  }
+
+  if (year && round && pick) {
+    return `${year}, Round: ${round}, Overall Pick: ${pick}`;
+  }
+
+  return year ? `${year} Draft` : "";
+}
+
 function extractCardDetails(html: string): Partial<PlayerCard> {
   const text = htmlToText(html);
   const draft = fieldAfter(text, "Draft", [
@@ -798,6 +897,22 @@ function parseBirthplace(value: string): Partial<PlayerCard> {
 }
 
 function extractEducation(person: Dict) {
+  const education = objectOf(person.education);
+  const educationCollege = formatSchool(
+    arrayOrSingle(education.colleges).map(objectOf)[0],
+  );
+  const educationHighSchool = formatSchool(
+    arrayOrSingle(education.highschools).map(objectOf)[0],
+  );
+
+  if (educationCollege) {
+    return { school: educationCollege, schoolType: "College" };
+  }
+
+  if (educationHighSchool) {
+    return { school: educationHighSchool, schoolType: "High School" };
+  }
+
   const highSchool =
     stringOf(person.highSchool) ||
     stringOf(findNestedValue(person, ["highSchool", "high_school"]));
@@ -815,6 +930,26 @@ function extractEducation(person: Dict) {
   }
 
   return { school: "", schoolType: "" };
+}
+
+function formatSchool(school: Dict) {
+  const name = stringOf(school.name);
+  if (!name) {
+    return "";
+  }
+
+  const city = stringOf(school.city);
+  const state = stringOf(school.state);
+  if (city && state) {
+    return `${name}, ${city}, ${state}`;
+  }
+
+  return name;
+}
+
+function schoolTypeFromDraftSchool(school: Dict) {
+  const schoolClass = stringOf(school.schoolClass);
+  return /HS|HIGH/i.test(schoolClass) ? "High School" : "College";
 }
 
 function extractDraft(person: Dict) {
@@ -925,6 +1060,18 @@ function hasUsefulBio(card: Partial<PlayerCard>) {
   );
 }
 
+function isFailedMeta(meta: PlayerMetaRow) {
+  return meta.failCount > 0 && !hasUsefulBio(meta);
+}
+
+function isUnverifiedBackgroundMeta(meta: PlayerMetaRow) {
+  return meta.failCount === 0 && !hasCachedBackgroundBio(meta);
+}
+
+function hasCachedBackgroundBio(card: Partial<PlayerCard>) {
+  return Boolean(card.draft || card.school || card.schoolType);
+}
+
 function hasBackgroundBio(card: Partial<PlayerCard>, player: Player) {
   return Boolean(
     card.draft ||
@@ -964,6 +1111,14 @@ function normalizeDate(value: string | null) {
   return new Date().toISOString().slice(0, 10);
 }
 
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function objectOf(value: unknown): Dict {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Dict)
@@ -972,6 +1127,18 @@ function objectOf(value: unknown): Dict {
 
 function arrayOf(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function arrayOrSingle(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value && typeof value === "object") {
+    return [value];
+  }
+
+  return [];
 }
 
 function stringOf(value: unknown): string {
