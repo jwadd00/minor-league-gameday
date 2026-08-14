@@ -96,6 +96,8 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.match(route, /daily_snapshot_state/);
   assert.match(route, /daily_team_snapshot/);
   assert.match(route, /withExplicitMissingValues/);
+  assert.match(route, /hydrate=person\(draft,education\)/);
+  assert.doesNotMatch(route, /await enrichPlayers\(uniquePlayers/);
   assert.match(route, /Snapshot validation failed because \$\{unresolvedPlayers\.length\} player records were not verified/);
   assert.match(route, /const PEOPLE_BATCH_SIZE = 200/);
   assert.match(route, /const PEOPLE_FETCH_CONCURRENCY = 2/);

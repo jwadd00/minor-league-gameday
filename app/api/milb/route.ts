@@ -185,27 +185,16 @@ export async function materializeDailySnapshot(date: string) {
   const teams = uniqueTeams(games);
   const generation = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
   const builtAt = Date.now();
-  const enrichmentErrors: string[] = [];
   const baseSnapshots = await mapLimit(teams, 8, async (team) => ({
     team,
     players: await getBaseRoster(team, date, cache, true),
   }));
-  const uniquePlayers = Array.from(
-    new Map(
-      baseSnapshots
-        .flatMap((entry) => entry.players)
-        .map((player) => [player.id, player]),
-    ).values(),
-  );
-  await enrichPlayers(uniquePlayers, cache, enrichmentErrors);
-
-  const teamSnapshots = await mapLimit(baseSnapshots, 8, async (entry) => {
-    const merged = await mergeCachedBio(entry.players, cache);
-    return {
-      team: entry.team,
-      players: merged.players.map(withExplicitMissingValues),
-    };
-  });
+  const teamSnapshots = baseSnapshots.map((entry) => ({
+    team: entry.team,
+    players: entry.players.map((player) =>
+      withExplicitMissingValues({ ...player, bioStatus: "fresh" }),
+    ),
+  }));
 
   const players = teamSnapshots.flatMap((entry) => entry.players);
   const unresolvedPlayers = players.filter(
@@ -215,11 +204,8 @@ export async function materializeDailySnapshot(date: string) {
     throw new Error("Snapshot validation failed because the schedule or rosters were empty.");
   }
   if (unresolvedPlayers.length > 0) {
-    const diagnostics = Array.from(new Set(enrichmentErrors)).slice(0, 3);
     throw new Error(
-      `Snapshot validation failed because ${unresolvedPlayers.length} player records were not verified.${
-        diagnostics.length > 0 ? ` Upstream: ${diagnostics.join(" | ")}` : ""
-      }`,
+      `Snapshot validation failed because ${unresolvedPlayers.length} player records were not verified.`,
     );
   }
   const missingDraft = players.filter((player) => isNotListed(player.draft)).length;
@@ -480,7 +466,7 @@ async function getBaseRoster(
   try {
     const season = date.slice(0, 4);
     const payload = await statsApi(
-      `/teams/${team.id}/roster?rosterType=fullRoster&season=${season}&date=${date}&hydrate=person`,
+      `/teams/${team.id}/roster?rosterType=fullRoster&season=${season}&date=${date}&hydrate=person(draft,education)`,
     );
     const roster = arrayOf(payload.roster);
     const players = roster
