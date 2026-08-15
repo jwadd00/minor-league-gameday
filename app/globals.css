@@ -856,6 +856,25 @@ select:focus {
     overflow: hidden;
   }
 
+  .games-grid .game-tools {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .games-grid .category-row {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding-bottom: 3px;
+    scrollbar-color: var(--blue) transparent;
+    scrollbar-width: thin;
+  }
+
+  .games-grid .category-row button {
+    min-width: 78px;
+    flex: 0 0 78px;
+  }
+
   .detail-panel {
     position: sticky;
     top: 16px;
@@ -869,8 +888,8 @@ select:focus {
   }
 
   .games-grid .game {
-    grid-template-columns: 62px minmax(0, 1fr) 28px minmax(0, 1fr);
-    min-height: 68px;
+    grid-template-columns: 58px minmax(0, 1fr) 24px minmax(0, 1fr);
+    min-height: 74px;
     overflow: hidden;
   }
 
@@ -897,6 +916,7 @@ select:focus {
   .games-grid .game > span.game-schedule {
     grid-column: 2 / span 2;
     grid-row: 2;
+    border-left: 1px solid rgba(143, 161, 173, 0.13);
   }
 
   .games-grid .game > span.game-status {
@@ -909,13 +929,7 @@ select:focus {
   }
 
   .games-grid .game > span.game-action {
-    grid-column: 4;
-    grid-row: 2;
-    max-width: calc(100% - 8px);
-    min-height: 24px;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: none;
   }
 
   .games-grid .game-away,

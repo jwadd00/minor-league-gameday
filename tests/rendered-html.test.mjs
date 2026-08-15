@@ -93,7 +93,8 @@ test("condenses games into a responsive schedule board", async () => {
   );
   assert.match(css, /\.detail-panel\s*{[\s\S]*?position:\s*sticky;/);
   assert.match(css, /\.games-grid \.game\s*{[\s\S]*?overflow:\s*hidden;/);
-  assert.match(css, /\.games-grid \.game > span\.game-action\s*{[\s\S]*?text-overflow:\s*ellipsis;/);
+  assert.match(css, /\.games-grid \.game > span\.game-action\s*{\s*display:\s*none;/);
+  assert.match(css, /\.games-grid \.category-row\s*{[\s\S]*?overflow-x:\s*auto;/);
 });
 
 test("collapses player tables into three concise mobile columns", async () => {
