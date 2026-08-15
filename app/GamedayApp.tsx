@@ -57,6 +57,40 @@ type GameDetail = {
   cacheInfo?: CacheInfo;
 };
 
+type BoxScoreLine = {
+  playerId: number;
+  name: string;
+  position: string;
+  batting?: {
+    atBats: number;
+    runs: number;
+    hits: number;
+    rbi: number;
+    walks: number;
+    strikeOuts: number;
+    homeRuns: number;
+  };
+  pitching?: {
+    inningsPitched: string;
+    hits: number;
+    runs: number;
+    earnedRuns: number;
+    walks: number;
+    strikeOuts: number;
+    pitches: number;
+  };
+};
+
+type BoxScore = {
+  gamePk: number;
+  fetchedAt: number;
+  teams: Array<{
+    team: TeamSummary;
+    batting: BoxScoreLine[];
+    pitching: BoxScoreLine[];
+  }>;
+};
+
 type PlayerIndex = {
   players: Player[];
   teamCount: number;
@@ -237,6 +271,7 @@ export function GamedayApp() {
   const [gameDetail, setGameDetail] = useState<ApiState<GameDetail>>({
     status: "idle",
   });
+  const [boxScore, setBoxScore] = useState<ApiState<BoxScore>>({ status: "idle" });
   const [allPlayers, setAllPlayers] = useState<ApiState<PlayerIndex>>({
     status: "idle",
   });
@@ -252,6 +287,7 @@ export function GamedayApp() {
     setGames({ status: "loading" });
     setSelectedGamePk(null);
     setGameDetail({ status: "idle" });
+    setBoxScore({ status: "idle" });
     setAllPlayers({ status: "loading" });
 
     getJson<{ games: Game[] }>(`/api/milb?view=games&date=${date}`)
@@ -310,6 +346,32 @@ export function GamedayApp() {
 
   const selectedGame =
     games.data?.find((game) => game.gamePk === selectedGamePk) ?? null;
+
+  useEffect(() => {
+    if (!selectedGame || selectedGame.status !== "Final") {
+      setBoxScore({ status: "idle" });
+      return;
+    }
+
+    let cancelled = false;
+    setBoxScore({ status: "loading" });
+
+    getJson<BoxScore>(`/api/milb?view=boxscore&date=${date}&gamePk=${selectedGame.gamePk}`)
+      .then((payload) => {
+        if (!cancelled) {
+          setBoxScore({ status: "ready", data: payload });
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setBoxScore({ status: "error", error: error.message });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [date, selectedGame]);
 
   const playersForPage = allPlayers.data?.players ?? [];
 
@@ -619,7 +681,7 @@ export function GamedayApp() {
               ) : null}
 
               {gameDetail.status === "ready" && gameDetail.data ? (
-                <RosterTables detail={gameDetail.data} />
+                <RosterTables detail={gameDetail.data} boxScore={boxScore} />
               ) : null}
             </section>
           </div>
@@ -760,7 +822,13 @@ function EmptyState({ title, text }: { title: string; text: string }) {
   );
 }
 
-function RosterTables({ detail }: { detail: GameDetail }) {
+function RosterTables({
+  detail,
+  boxScore,
+}: {
+  detail: GameDetail;
+  boxScore: ApiState<BoxScore>;
+}) {
   const players = detail.teams.flatMap((entry) => entry.players);
 
   return (
@@ -772,9 +840,160 @@ function RosterTables({ detail }: { detail: GameDetail }) {
           </span>
         ))}
       </div>
+      {detail.game.status === "Final" ? <FinalBoxScore state={boxScore} /> : null}
       <PlayerTableEnhanced players={players} />
     </div>
   );
+}
+
+function FinalBoxScore({ state }: { state: ApiState<BoxScore> }) {
+  if (state.status === "loading") {
+    return <LoadingBlock label="Loading final box score" />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <EmptyState
+        title="Box score unavailable"
+        text={state.error ?? "The final player lines are not available yet."}
+      />
+    );
+  }
+
+  if (state.status !== "ready" || !state.data) {
+    return null;
+  }
+
+  return (
+    <section className="box-score-panel" aria-label="Final box score">
+      <div className="box-score-heading">
+        <div>
+          <p className="eyebrow">Final box score</p>
+          <h3>Player game lines</h3>
+        </div>
+        <button type="button" onClick={() => downloadBoxScoreCsv(state.data!)}>
+          Download CSV
+        </button>
+      </div>
+      {state.data.teams.map((entry) => (
+        <div className="box-score-team" key={entry.team.id}>
+          <h4>
+            <TeamName team={entry.team} />
+          </h4>
+          <BoxScoreTable title="Batting" rows={entry.batting} kind="batting" />
+          <BoxScoreTable title="Pitching" rows={entry.pitching} kind="pitching" />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function BoxScoreTable({
+  title,
+  rows,
+  kind,
+}: {
+  title: string;
+  rows: BoxScoreLine[];
+  kind: "batting" | "pitching";
+}) {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="box-score-table-wrap">
+      <h5>{title}</h5>
+      <table className="box-score-table">
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th>Pos</th>
+            {kind === "batting" ? (
+              <>
+                <th>AB</th>
+                <th>R</th>
+                <th>H</th>
+                <th>RBI</th>
+                <th>BB</th>
+                <th>SO</th>
+                <th>HR</th>
+              </>
+            ) : (
+              <>
+                <th>IP</th>
+                <th>H</th>
+                <th>R</th>
+                <th>ER</th>
+                <th>BB</th>
+                <th>SO</th>
+                <th>Pitches</th>
+              </>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((player) => (
+            <tr key={player.playerId}>
+              <td>{player.name}</td>
+              <td>{player.position || "-"}</td>
+              {kind === "batting" && player.batting ? (
+                <>
+                  <td>{player.batting.atBats}</td>
+                  <td>{player.batting.runs}</td>
+                  <td>{player.batting.hits}</td>
+                  <td>{player.batting.rbi}</td>
+                  <td>{player.batting.walks}</td>
+                  <td>{player.batting.strikeOuts}</td>
+                  <td>{player.batting.homeRuns}</td>
+                </>
+              ) : null}
+              {kind === "pitching" && player.pitching ? (
+                <>
+                  <td>{player.pitching.inningsPitched}</td>
+                  <td>{player.pitching.hits}</td>
+                  <td>{player.pitching.runs}</td>
+                  <td>{player.pitching.earnedRuns}</td>
+                  <td>{player.pitching.walks}</td>
+                  <td>{player.pitching.strikeOuts}</td>
+                  <td>{player.pitching.pitches}</td>
+                </>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function downloadBoxScoreCsv(boxScore: BoxScore) {
+  const rows = [
+    ["Type", "Team", "Player", "Pos", "AB", "R", "H", "RBI", "BB", "SO", "HR", "IP", "H Allowed", "R Allowed", "ER", "BB Allowed", "SO Pitched", "Pitches"],
+  ];
+
+  for (const entry of boxScore.teams) {
+    for (const player of entry.batting) {
+      const line = player.batting!;
+      rows.push(["Batting", entry.team.shortName || entry.team.name, player.name, player.position, line.atBats, line.runs, line.hits, line.rbi, line.walks, line.strikeOuts, line.homeRuns, "", "", "", "", "", "", ""]);
+    }
+    for (const player of entry.pitching) {
+      const line = player.pitching!;
+      rows.push(["Pitching", entry.team.shortName || entry.team.name, player.name, player.position, "", "", "", "", "", "", "", line.inningsPitched, line.hits, line.runs, line.earnedRuns, line.walks, line.strikeOuts, line.pitches]);
+    }
+  }
+
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `gameday-scout-box-score-${boxScore.gamePk}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: string | number) {
+  return `"${String(value).replaceAll('"', '""')}"`;
 }
 
 function PlayerTable({ players }: { players: Player[] }) {

@@ -76,3 +76,9 @@ export const dailyTeamSnapshot = sqliteTable(
     ),
   ],
 );
+
+export const gameBoxScoreCache = sqliteTable("game_box_score_cache", {
+  gamePk: integer("game_pk").primaryKey(),
+  payload: text("payload").notNull(),
+  fetchedAt: integer("fetched_at").notNull(),
+});

@@ -832,6 +832,93 @@ select:focus {
   text-transform: uppercase;
 }
 
+.box-score-panel {
+  border: 1px solid rgba(77, 232, 255, 0.32);
+  border-radius: 6px;
+  background: rgba(4, 11, 15, 0.76);
+  padding: 14px;
+}
+
+.box-score-heading,
+.box-score-team h4 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.box-score-heading h3 {
+  margin: 2px 0 0;
+  color: #f2fbff;
+  font-size: 1rem;
+}
+
+.box-score-heading button {
+  min-height: 30px;
+  border: 1px solid rgba(36, 245, 193, 0.72);
+  border-radius: 4px;
+  background: rgba(36, 245, 193, 0.1);
+  color: var(--green);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.box-score-team {
+  margin-top: 14px;
+}
+
+.box-score-team h4 {
+  margin: 0 0 8px;
+  color: #dffaff;
+  font-size: 0.78rem;
+}
+
+.box-score-team h4 .team-name {
+  gap: 7px;
+}
+
+.box-score-team h4 .team-logo {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+}
+
+.box-score-table-wrap + .box-score-table-wrap {
+  margin-top: 10px;
+}
+
+.box-score-table-wrap h5 {
+  margin: 0 0 4px;
+  color: #92aab7;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.box-score-table {
+  min-width: 650px;
+  font-size: 0.7rem;
+}
+
+.box-score-table th,
+.box-score-table td {
+  padding: 6px 8px;
+  text-align: right;
+}
+
+.box-score-table th:first-child,
+.box-score-table th:nth-child(2),
+.box-score-table td:first-child,
+.box-score-table td:nth-child(2) {
+  text-align: left;
+}
+
+.box-score-table td:first-child {
+  color: #e7f4f8;
+  font-weight: 800;
+}
+
 .detail-head a,
 table a {
   color: var(--green);

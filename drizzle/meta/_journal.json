@@ -15,6 +15,13 @@
       "when": 1786714016953,
       "tag": "0001_curly_mattie_franklin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786793946185,
+      "tag": "0002_careless_shen",
+      "breakpoints": true
     }
   ]
 }

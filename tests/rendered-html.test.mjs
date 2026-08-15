@@ -141,3 +141,22 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.match(scheduler, /x-gameday-cache-token/);
   assert.match(schedulerConfig, /"crons":\s*\["0 10,14,18,22 \* \* \*"\]/);
 });
+
+test("shows and caches labeled CSV-ready box scores for final games", async () => {
+  const [client, route, schema, migration] = await Promise.all([
+    readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0002_careless_shen.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(client, /view=boxscore/);
+  assert.match(client, /Final box score/);
+  assert.match(client, /Download CSV/);
+  assert.match(client, /function downloadBoxScoreCsv/);
+  assert.match(route, /\/game\/\$\{game\.gamePk\}\/boxscore/);
+  assert.match(route, /game_box_score_cache/);
+  assert.match(route, /Promise\.allSettled/);
+  assert.match(schema, /gameBoxScoreCache/);
+  assert.match(migration, /game_box_score_cache/);
+});
