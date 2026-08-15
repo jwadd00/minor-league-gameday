@@ -839,6 +839,77 @@ select:focus {
   line-height: 1.3;
 }
 
+@media (min-width: 1180px) {
+  .games-grid {
+    grid-template-columns: minmax(400px, 0.75fr) minmax(0, 1.25fr);
+    align-items: start;
+    gap: 16px;
+  }
+
+  .games-panel,
+  .detail-panel {
+    height: min(730px, calc(100vh - 32px));
+    max-height: min(730px, calc(100vh - 32px));
+  }
+
+  .detail-panel {
+    position: sticky;
+    top: 16px;
+    overflow-y: auto;
+    scrollbar-color: var(--blue) rgba(255, 255, 255, 0.08);
+    scrollbar-width: thin;
+  }
+
+  .games-grid .game-list-head {
+    display: none;
+  }
+
+  .games-grid .game {
+    grid-template-columns: 62px minmax(0, 1fr) 28px minmax(0, 1fr);
+    min-height: 68px;
+  }
+
+  .games-grid .game .level {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .games-grid .game-away {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .games-grid .game-matchup {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .games-grid .game-home {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  .games-grid .game > span.game-schedule {
+    grid-column: 2 / span 2;
+    grid-row: 2;
+  }
+
+  .games-grid .game > span.game-status {
+    grid-column: 1;
+    grid-row: 2;
+    border-left: 0;
+    justify-content: center;
+    padding-inline: 4px;
+    text-align: center;
+  }
+
+  .games-grid .game > span.game-action {
+    grid-column: 4;
+    grid-row: 2;
+    min-height: 24px;
+  }
+}
+
 .detail-head a,
 table a {
   color: var(--green);

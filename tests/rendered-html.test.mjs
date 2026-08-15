@@ -86,6 +86,12 @@ test("condenses games into a responsive schedule board", async () => {
   assert.match(css, /\.game > span\.game-away,[\s\S]*?grid-column:\s*auto;/);
   assert.match(css, /\.game > span\.game-schedule\s*{\s*grid-column:\s*2 \/ span 2;/);
   assert.match(css, /\.game-status strong/);
+  assert.match(client, /window\.matchMedia\("\(max-width: 1179px\)"\)/);
+  assert.match(
+    css,
+    /@media \(min-width: 1180px\)\s*{[\s\S]*?\.games-grid\s*{[\s\S]*?grid-template-columns:\s*minmax\(400px, 0\.75fr\) minmax\(0, 1\.25fr\);/,
+  );
+  assert.match(css, /\.detail-panel\s*{[\s\S]*?position:\s*sticky;/);
 });
 
 test("collapses player tables into three concise mobile columns", async () => {

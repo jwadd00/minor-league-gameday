@@ -394,7 +394,9 @@ export function GamedayApp() {
   function selectGame(gamePk: number) {
     setActiveTab("games");
     setSelectedGamePk(gamePk);
-    scrollTo(detailRef);
+    if (window.matchMedia("(max-width: 1179px)").matches) {
+      scrollTo(detailRef);
+    }
   }
 
   const filteredGames = useMemo(() => {
