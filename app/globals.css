@@ -784,7 +784,10 @@ select:focus {
 
 .game > span.game-schedule,
 .game > span.game-status,
-.game > span.game-action {
+.game > span.game-action,
+.game > span.game-away,
+.game > span.game-matchup,
+.game > span.game-home {
   grid-column: auto;
   grid-row: auto;
 }
@@ -992,9 +995,9 @@ td .team-logo {
 
 table {
   width: 100%;
-  min-width: 900px;
+  min-width: 760px;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 th {
@@ -1031,7 +1034,7 @@ th {
 th,
 td {
   border-bottom: 1px solid rgba(143, 161, 173, 0.14);
-  padding: 9px 10px;
+  padding: 7px 8px;
   vertical-align: top;
 }
 
@@ -1041,8 +1044,22 @@ td {
 }
 
 td:first-child,
-td:nth-child(6) {
+.col-school {
+  min-width: 155px;
+}
+
+.col-draft {
   min-width: 180px;
+}
+
+.table-wrap td .team-logo {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+}
+
+.table-wrap .team-name {
+  gap: 6px;
 }
 
 td span {

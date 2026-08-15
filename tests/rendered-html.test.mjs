@@ -81,6 +81,7 @@ test("condenses games into a responsive schedule board", async () => {
     /\.game-list-head,[\s\S]*?\.game\s*{[\s\S]*?grid-template-columns:\s*82px\s*minmax\(130px,\s*1fr\)\s*44px\s*minmax\(130px,\s*1fr\)\s*minmax\(180px,\s*1\.25fr\)\s*96px\s*92px;/,
   );
   assert.match(css, /\.game\s*{[\s\S]*?min-height:\s*50px;/);
+  assert.match(css, /\.game > span\.game-away,[\s\S]*?grid-column:\s*auto;/);
   assert.match(css, /\.game > span\.game-schedule\s*{\s*grid-column:\s*2 \/ span 2;/);
 });
 
@@ -93,6 +94,11 @@ test("collapses player tables into three concise mobile columns", async () => {
   assert.match(client, /className="mobile-player-team"/);
   assert.match(client, /className="mobile-player-meta"/);
   assert.match(client, /compactDraft\(player\.draft/);
+  assert.match(client, /label: "Pos \/ No\."/);
+  assert.match(client, /label: "Birthplace"/);
+  assert.match(client, /<span>#\{player\.number\}<\/span>/);
+  assert.match(client, /<span>\{player\.birthState \|\| player\.birthCountry \|\| "-"\}<\/span>/);
+  assert.match(css, /min-width:\s*760px/);
   assert.match(css, /@media \(max-width: 620px\)/);
   assert.match(css, /\.col-teamName,[\s\S]*?\.col-state\s*{\s*display:\s*none;/);
   assert.match(css, /\.col-name\s*{\s*width:\s*39%;/);

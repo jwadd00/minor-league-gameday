@@ -106,12 +106,10 @@ const LEVEL_ORDER = ["Triple-A", "Double-A", "High-A", "Single-A", "Rookie"];
 const PLAYER_COLUMNS: Array<{ key: PlayerSortKey; label: string }> = [
   { key: "name", label: "Player" },
   { key: "teamName", label: "Team" },
-  { key: "position", label: "Pos" },
-  { key: "number", label: "No." },
+  { key: "position", label: "Pos / No." },
   { key: "draft", label: "Draft Spot" },
   { key: "school", label: "College or High School" },
-  { key: "birthCity", label: "Birth City" },
-  { key: "state", label: "State" },
+  { key: "birthCity", label: "Birthplace" },
 ];
 
 const todayValue = () => new Date().toISOString().slice(0, 10);
@@ -1008,8 +1006,10 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
                   <td className="col-teamName">
                     <PlayerTeamName player={player} />
                   </td>
-                  <td className="col-position">{player.position || "-"}</td>
-                  <td className="col-number">{player.number || "-"}</td>
+                  <td className="col-position">
+                    {player.position || "-"}
+                    {player.number ? <span>#{player.number}</span> : null}
+                  </td>
                   <td className="col-draft">
                     <span className="desktop-cell-value">{player.draft || "-"}</span>
                     <span className="mobile-cell-value" title={player.draft}>
@@ -1020,9 +1020,9 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
                     {player.school || "-"}
                     {player.schoolType ? <span>{player.schoolType}</span> : null}
                   </td>
-                  <td className="col-birthCity">{player.birthCity || "-"}</td>
-                  <td className="col-state">
-                    {player.birthState || player.birthCountry || "-"}
+                  <td className="col-birthCity">
+                    {player.birthCity || "-"}
+                    <span>{player.birthState || player.birthCountry || "-"}</span>
                   </td>
                 </tr>
               ))}
