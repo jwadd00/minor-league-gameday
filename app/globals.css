@@ -852,6 +852,10 @@ select:focus {
     max-height: min(730px, calc(100vh - 32px));
   }
 
+  .games-panel {
+    overflow: hidden;
+  }
+
   .detail-panel {
     position: sticky;
     top: 16px;
@@ -867,6 +871,7 @@ select:focus {
   .games-grid .game {
     grid-template-columns: 62px minmax(0, 1fr) 28px minmax(0, 1fr);
     min-height: 68px;
+    overflow: hidden;
   }
 
   .games-grid .game .level {
@@ -906,7 +911,19 @@ select:focus {
   .games-grid .game > span.game-action {
     grid-column: 4;
     grid-row: 2;
+    max-width: calc(100% - 8px);
     min-height: 24px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .games-grid .game-away,
+  .games-grid .game-home,
+  .games-grid .game-schedule,
+  .games-grid .game-status {
+    min-width: 0;
+    overflow: hidden;
   }
 }
 
