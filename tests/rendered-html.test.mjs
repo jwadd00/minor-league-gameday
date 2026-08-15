@@ -142,7 +142,7 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.match(schedulerConfig, /"crons":\s*\["0 10,14,18,22 \* \* \*"\]/);
 });
 
-test("shows and caches labeled CSV-ready box scores for final games", async () => {
+test("adds concise non-zero box score data to final game roster rows", async () => {
   const [client, route, schema, migration] = await Promise.all([
     readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
@@ -151,9 +151,12 @@ test("shows and caches labeled CSV-ready box scores for final games", async () =
   ]);
 
   assert.match(client, /view=boxscore/);
-  assert.match(client, /Final box score/);
-  assert.match(client, /Download CSV/);
-  assert.match(client, /function downloadBoxScoreCsv/);
+  assert.match(client, /Game stats/);
+  assert.match(client, /function gameStatsByPlayer/);
+  assert.match(client, /line\.homeRuns > 0/);
+  assert.match(client, /line\.inningsPitched !== "0\.0"/);
+  assert.match(client, /className="mobile-game-stats"/);
+  assert.doesNotMatch(client, /Final box score|Download CSV|function downloadBoxScoreCsv/);
   assert.match(route, /\/game\/\$\{game\.gamePk\}\/boxscore/);
   assert.match(route, /game_box_score_cache/);
   assert.match(route, /Promise\.allSettled/);

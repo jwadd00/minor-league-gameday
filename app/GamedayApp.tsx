@@ -830,6 +830,8 @@ function RosterTables({
   boxScore: ApiState<BoxScore>;
 }) {
   const players = detail.teams.flatMap((entry) => entry.players);
+  const showGameStats = detail.game.status === "Final";
+  const gameStats = boxScore.data ? gameStatsByPlayer(boxScore.data) : new Map<number, string>();
 
   return (
     <div className="roster-stack">
@@ -840,160 +842,58 @@ function RosterTables({
           </span>
         ))}
       </div>
-      {detail.game.status === "Final" ? <FinalBoxScore state={boxScore} /> : null}
-      <PlayerTableEnhanced players={players} />
-    </div>
-  );
-}
-
-function FinalBoxScore({ state }: { state: ApiState<BoxScore> }) {
-  if (state.status === "loading") {
-    return <LoadingBlock label="Loading final box score" />;
-  }
-
-  if (state.status === "error") {
-    return (
-      <EmptyState
-        title="Box score unavailable"
-        text={state.error ?? "The final player lines are not available yet."}
+      <PlayerTableEnhanced
+        players={players}
+        gameStats={showGameStats ? gameStats : undefined}
+        gameStatsStatus={showGameStats ? boxScore.status : undefined}
       />
-    );
-  }
-
-  if (state.status !== "ready" || !state.data) {
-    return null;
-  }
-
-  return (
-    <section className="box-score-panel" aria-label="Final box score">
-      <div className="box-score-heading">
-        <div>
-          <p className="eyebrow">Final box score</p>
-          <h3>Player game lines</h3>
-        </div>
-        <button type="button" onClick={() => downloadBoxScoreCsv(state.data!)}>
-          Download CSV
-        </button>
-      </div>
-      {state.data.teams.map((entry) => (
-        <div className="box-score-team" key={entry.team.id}>
-          <h4>
-            <TeamName team={entry.team} />
-          </h4>
-          <BoxScoreTable title="Batting" rows={entry.batting} kind="batting" />
-          <BoxScoreTable title="Pitching" rows={entry.pitching} kind="pitching" />
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function BoxScoreTable({
-  title,
-  rows,
-  kind,
-}: {
-  title: string;
-  rows: BoxScoreLine[];
-  kind: "batting" | "pitching";
-}) {
-  if (rows.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="box-score-table-wrap">
-      <h5>{title}</h5>
-      <table className="box-score-table">
-        <thead>
-          <tr>
-            <th>Player</th>
-            <th>Pos</th>
-            {kind === "batting" ? (
-              <>
-                <th>AB</th>
-                <th>R</th>
-                <th>H</th>
-                <th>RBI</th>
-                <th>BB</th>
-                <th>SO</th>
-                <th>HR</th>
-              </>
-            ) : (
-              <>
-                <th>IP</th>
-                <th>H</th>
-                <th>R</th>
-                <th>ER</th>
-                <th>BB</th>
-                <th>SO</th>
-                <th>Pitches</th>
-              </>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((player) => (
-            <tr key={player.playerId}>
-              <td>{player.name}</td>
-              <td>{player.position || "-"}</td>
-              {kind === "batting" && player.batting ? (
-                <>
-                  <td>{player.batting.atBats}</td>
-                  <td>{player.batting.runs}</td>
-                  <td>{player.batting.hits}</td>
-                  <td>{player.batting.rbi}</td>
-                  <td>{player.batting.walks}</td>
-                  <td>{player.batting.strikeOuts}</td>
-                  <td>{player.batting.homeRuns}</td>
-                </>
-              ) : null}
-              {kind === "pitching" && player.pitching ? (
-                <>
-                  <td>{player.pitching.inningsPitched}</td>
-                  <td>{player.pitching.hits}</td>
-                  <td>{player.pitching.runs}</td>
-                  <td>{player.pitching.earnedRuns}</td>
-                  <td>{player.pitching.walks}</td>
-                  <td>{player.pitching.strikeOuts}</td>
-                  <td>{player.pitching.pitches}</td>
-                </>
-              ) : null}
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
 
-function downloadBoxScoreCsv(boxScore: BoxScore) {
-  const rows = [
-    ["Type", "Team", "Player", "Pos", "AB", "R", "H", "RBI", "BB", "SO", "HR", "IP", "H Allowed", "R Allowed", "ER", "BB Allowed", "SO Pitched", "Pitches"],
-  ];
+function gameStatsByPlayer(boxScore: BoxScore) {
+  const stats = new Map<number, string>();
 
-  for (const entry of boxScore.teams) {
-    for (const player of entry.batting) {
-      const line = player.batting!;
-      rows.push(["Batting", entry.team.shortName || entry.team.name, player.name, player.position, line.atBats, line.runs, line.hits, line.rbi, line.walks, line.strikeOuts, line.homeRuns, "", "", "", "", "", "", ""]);
+  for (const team of boxScore.teams) {
+    for (const player of team.batting) {
+      const line = player.batting;
+      if (!line) {
+        continue;
+      }
+      const values = [
+        line.hits > 0 ? `${line.hits}-${line.atBats}` : "",
+        line.runs > 0 ? `${line.runs} R` : "",
+        line.rbi > 0 ? `${line.rbi} RBI` : "",
+        line.homeRuns > 0 ? `${line.homeRuns} HR` : "",
+        line.walks > 0 ? `${line.walks} BB` : "",
+        line.strikeOuts > 0 ? `${line.strikeOuts} SO` : "",
+      ].filter(Boolean);
+      if (values.length > 0) {
+        stats.set(player.playerId, values.join(", "));
+      }
     }
-    for (const player of entry.pitching) {
-      const line = player.pitching!;
-      rows.push(["Pitching", entry.team.shortName || entry.team.name, player.name, player.position, "", "", "", "", "", "", "", line.inningsPitched, line.hits, line.runs, line.earnedRuns, line.walks, line.strikeOuts, line.pitches]);
+
+    for (const player of team.pitching) {
+      const line = player.pitching;
+      if (!line) {
+        continue;
+      }
+      const values = [
+        line.inningsPitched !== "0.0" ? `${line.inningsPitched} IP` : "",
+        line.hits > 0 ? `${line.hits} H` : "",
+        line.runs > 0 ? `${line.runs} R` : "",
+        line.earnedRuns > 0 ? `${line.earnedRuns} ER` : "",
+        line.walks > 0 ? `${line.walks} BB` : "",
+        line.strikeOuts > 0 ? `${line.strikeOuts} SO` : "",
+        line.pitches > 0 ? `${line.pitches} P` : "",
+      ].filter(Boolean);
+      if (values.length > 0) {
+        stats.set(player.playerId, [stats.get(player.playerId), ...values].filter(Boolean).join(", "));
+      }
     }
   }
 
-  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `gameday-scout-box-score-${boxScore.gamePk}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function csvCell(value: string | number) {
-  return `"${String(value).replaceAll('"', '""')}"`;
+  return stats;
 }
 
 function PlayerTable({ players }: { players: Player[] }) {
@@ -1048,7 +948,15 @@ function PlayerTable({ players }: { players: Player[] }) {
   );
 }
 
-function PlayerTableEnhanced({ players }: { players: Player[] }) {
+function PlayerTableEnhanced({
+  players,
+  gameStats,
+  gameStatsStatus,
+}: {
+  players: Player[];
+  gameStats?: Map<number, string>;
+  gameStatsStatus?: ApiState<BoxScore>["status"];
+}) {
   const [tableQuery, setTableQuery] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState("");
@@ -1216,6 +1124,7 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
                     </button>
                   </th>
                 ))}
+                {gameStats ? <th className="col-gameStats">Game stats</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -1230,6 +1139,12 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
                     <span className="mobile-player-meta">
                       {compactPlayerMeta(player)}
                     </span>
+                    {gameStats ? (
+                      <span className="mobile-game-stats">
+                        {gameStats.get(player.id) ||
+                          (gameStatsStatus === "loading" ? "Game stats loading..." : "")}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="col-teamName">
                     <PlayerTeamName player={player} />
@@ -1252,6 +1167,12 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
                     {player.birthCity || "-"}
                     <span>{player.birthState || player.birthCountry || "-"}</span>
                   </td>
+                  {gameStats ? (
+                    <td className="col-gameStats">
+                      {gameStats.get(player.id) ||
+                        (gameStatsStatus === "loading" ? "Loading..." : "-")}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
