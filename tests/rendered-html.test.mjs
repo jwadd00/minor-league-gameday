@@ -64,20 +64,24 @@ test("keeps the product styling and removes starter preview assets", async () =>
   await assert.rejects(access(new URL("app/_sites-preview", templateRoot)));
 });
 
-test("keeps game cards aligned to the modern horizontal spec", async () => {
-  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+test("condenses games into a responsive schedule board", async () => {
+  const [client, css] = await Promise.all([
+    readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
 
-  assert.match(css, /\.game-list\s*{[^}]*grid-template-columns:\s*1fr;/s);
+  assert.match(client, /className="game-list-head"/);
+  assert.match(client, /<span>Away team<\/span>/);
+  assert.match(client, /className="game-away"/);
+  assert.match(client, /className="game-home"/);
+  assert.match(client, /className="game-schedule"/);
+  assert.match(client, /className="game-action">View roster/);
   assert.match(
     css,
-    /\.game\s*{[^}]*grid-template-columns:\s*minmax\(112px,\s*0\.72fr\)\s*minmax\(320px,\s*2\.1fr\)\s*minmax\(210px,\s*1fr\)\s*132px;/s,
+    /\.game-list-head,[\s\S]*?\.game\s*{[\s\S]*?grid-template-columns:\s*82px\s*minmax\(130px,\s*1fr\)\s*44px\s*minmax\(130px,\s*1fr\)\s*minmax\(180px,\s*1\.25fr\)\s*96px\s*92px;/,
   );
-  assert.match(css, /\.game::after\s*{[^}]*grid-column:\s*4;/s);
-  assert.match(css, /\.game-teams\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*46px\s*minmax\(0,\s*1fr\);/s);
-  assert.match(css, /\.game-teams \.team-name\s*{[^}]*flex-direction:\s*column;/s);
-  assert.match(css, /\.game-teams \.versus\s*{[^}]*justify-self:\s*center;/s);
-  assert.match(css, /\.game > span:not\(\.level\)\s*{[^}]*grid-column:\s*3;/s);
-  assert.match(css, /\.game small\s*{[^}]*grid-column:\s*1;/s);
+  assert.match(css, /\.game\s*{[\s\S]*?min-height:\s*50px;/);
+  assert.match(css, /\.game > span\.game-schedule\s*{\s*grid-column:\s*2 \/ span 2;/);
 });
 
 test("collapses player tables into three concise mobile columns", async () => {

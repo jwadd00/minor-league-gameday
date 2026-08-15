@@ -654,6 +654,172 @@ select:focus {
   font-weight: 800;
 }
 
+/* Compact schedule board */
+.games-panel {
+  max-height: 590px;
+}
+
+.category-row button {
+  min-height: 42px;
+  border-radius: 6px;
+  padding: 5px 7px;
+}
+
+.game-list-head,
+.game {
+  display: grid;
+  grid-template-columns: 82px minmax(130px, 1fr) 44px minmax(130px, 1fr) minmax(180px, 1.25fr) 96px 92px;
+  gap: 0;
+  align-items: center;
+}
+
+.game-list-head {
+  margin-right: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px 5px 0 0;
+  background: rgba(8, 12, 16, 0.9);
+  color: #9decff;
+  font-size: 0.64rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.game-list-head span,
+.game > span {
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.game-list-head span + span,
+.game > span + span {
+  border-left: 1px solid rgba(143, 161, 173, 0.13);
+}
+
+.game-list {
+  gap: 0;
+  min-height: 220px;
+}
+
+.game {
+  width: 100%;
+  min-height: 50px;
+  overflow: visible;
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(143, 161, 173, 0.17);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.game:nth-child(even) {
+  background: rgba(77, 232, 255, 0.035);
+}
+
+.game:first-child {
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+
+.game::before,
+.game::after {
+  display: none;
+  content: none;
+}
+
+.game:hover,
+.game.active {
+  border-color: var(--blue);
+  background: rgba(77, 232, 255, 0.12);
+  box-shadow: inset 3px 0 0 var(--blue), 0 0 15px rgba(77, 232, 255, 0.18);
+  transform: none;
+}
+
+.game.active {
+  border-color: var(--green);
+  box-shadow: inset 3px 0 0 var(--green), 0 0 15px rgba(36, 245, 193, 0.2);
+}
+
+.game .level {
+  display: block;
+  width: auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 6px 8px;
+  box-shadow: none;
+  font-size: 0.65rem;
+  text-align: center;
+}
+
+.game-away .team-name,
+.game-home .team-name {
+  width: 100%;
+}
+
+.game-away .team-logo,
+.game-home .team-logo {
+  width: 27px;
+  height: 27px;
+  flex-basis: 27px;
+}
+
+.game-away .team-name > span:last-child,
+.game-home .team-name > span:last-child {
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.game-matchup {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.game > span.game-schedule,
+.game > span.game-status,
+.game > span.game-action {
+  grid-column: auto;
+  grid-row: auto;
+}
+
+.game-schedule {
+  overflow: hidden;
+  color: #d8e8ef;
+  font-size: 0.7rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-status {
+  color: #bff9e9;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.game-action {
+  display: inline-flex;
+  min-height: 28px;
+  margin: 0 6px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(77, 232, 255, 0.58) !important;
+  border-radius: 4px;
+  background: rgba(77, 232, 255, 0.12);
+  color: #dfffff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
 .detail-head a,
 table a {
   color: var(--green);
@@ -917,8 +1083,9 @@ td span {
     grid-template-columns: repeat(4, minmax(100px, 1fr));
   }
 
+  .game-list-head,
   .game {
-    grid-template-columns: minmax(96px, 0.7fr) minmax(260px, 1.8fr) minmax(160px, 1fr) 120px;
+    grid-template-columns: 72px minmax(110px, 1fr) 36px minmax(110px, 1fr) minmax(150px, 1.1fr) 86px 82px;
   }
 }
 
@@ -936,25 +1103,52 @@ td span {
     flex-wrap: wrap;
   }
 
+  .game-list-head {
+    display: none;
+  }
+
   .game {
-    grid-template-columns: 1fr;
+    grid-template-columns: 62px minmax(0, 1fr) 28px minmax(0, 1fr);
+    min-height: 68px;
   }
 
-  .game .level,
-  .game small,
-  .game-teams,
-  .game > span:not(.level),
-  .game::after {
+  .game .level {
     grid-column: 1;
-    grid-row: auto;
+    grid-row: 1;
   }
 
-  .game-teams {
-    grid-template-columns: 1fr;
+  .game-away {
+    grid-column: 2;
+    grid-row: 1;
   }
 
-  .game-teams .versus {
-    width: fit-content;
+  .game-matchup {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .game-home {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  .game > span.game-schedule {
+    grid-column: 2 / span 2;
+    grid-row: 2;
+    border-left: 1px solid rgba(143, 161, 173, 0.13);
+  }
+
+  .game > span.game-status {
+    grid-column: 1;
+    grid-row: 2;
+    border-left: 0;
+    text-align: center;
+  }
+
+  .game > span.game-action {
+    grid-column: 4;
+    grid-row: 2;
+    min-height: 24px;
   }
 
   .games-panel {

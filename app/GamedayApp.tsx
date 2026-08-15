@@ -546,6 +546,15 @@ export function GamedayApp() {
                 />
               ) : null}
 
+              <div className="game-list-head" aria-hidden="true">
+                <span>Level</span>
+                <span>Away team</span>
+                <span>Matchup</span>
+                <span>Home team</span>
+                <span>Start / venue</span>
+                <span>Status</span>
+                <span>Roster</span>
+              </div>
               <div className="game-list">
                 {filteredGames.map((game) => (
                   <button
@@ -555,11 +564,18 @@ export function GamedayApp() {
                     onClick={() => selectGame(game.gamePk)}
                   >
                     <span className="level">{game.level}</span>
-                    <GameTeams game={game} />
-                    <span>
+                    <span className="game-away">
+                      <TeamName team={game.away} />
+                    </span>
+                    <span className="game-matchup">at</span>
+                    <span className="game-home">
+                      <TeamName team={game.home} />
+                    </span>
+                    <span className="game-schedule">
                       {formatGameTime(game.gameDate)} · {game.venue}
                     </span>
-                    <small>{game.status}</small>
+                    <span className="game-status">{game.status}</span>
+                    <span className="game-action">View roster</span>
                   </button>
                 ))}
               </div>
@@ -725,16 +741,6 @@ function PlayerTeamName({ player }: { player: Player }) {
       <TeamLogo team={{ id: player.teamId, name: player.teamName }} />
       <span>{player.teamName}</span>
     </span>
-  );
-}
-
-function GameTeams({ game }: { game: Game }) {
-  return (
-    <strong className="game-teams">
-      <TeamName team={game.away} />
-      <span className="versus">at</span>
-      <TeamName team={game.home} />
-    </strong>
   );
 }
 
