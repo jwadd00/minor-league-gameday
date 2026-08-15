@@ -75,6 +75,8 @@ test("condenses games into a responsive schedule board", async () => {
   assert.match(client, /className="game-away"/);
   assert.match(client, /className="game-home"/);
   assert.match(client, /className="game-schedule"/);
+  assert.match(client, /game\.status === "Final"/);
+  assert.match(client, /game\.awayScore\}-\{game\.homeScore/);
   assert.match(client, /className="game-action">View roster/);
   assert.match(
     css,
@@ -83,6 +85,7 @@ test("condenses games into a responsive schedule board", async () => {
   assert.match(css, /\.game\s*{[\s\S]*?min-height:\s*50px;/);
   assert.match(css, /\.game > span\.game-away,[\s\S]*?grid-column:\s*auto;/);
   assert.match(css, /\.game > span\.game-schedule\s*{\s*grid-column:\s*2 \/ span 2;/);
+  assert.match(css, /\.game-status strong/);
 });
 
 test("collapses player tables into three concise mobile columns", async () => {

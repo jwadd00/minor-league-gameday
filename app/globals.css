@@ -802,9 +802,18 @@ select:focus {
 }
 
 .game-status {
+  align-items: center;
   color: #bff9e9;
+  display: flex;
   font-size: 0.7rem;
   font-weight: 800;
+  gap: 6px;
+}
+
+.game-status strong {
+  color: var(--green);
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .game-action {

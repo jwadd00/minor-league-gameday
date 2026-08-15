@@ -6,6 +6,8 @@ type Game = {
   gamePk: number;
   gameDate: string;
   status: string;
+  awayScore: number | null;
+  homeScore: number | null;
   venue: string;
   level: string;
   away: TeamSummary;
@@ -550,7 +552,7 @@ export function GamedayApp() {
                 <span>Matchup</span>
                 <span>Home team</span>
                 <span>Start / venue</span>
-                <span>Status</span>
+                <span>Status / score</span>
                 <span>Roster</span>
               </div>
               <div className="game-list">
@@ -572,7 +574,14 @@ export function GamedayApp() {
                     <span className="game-schedule">
                       {formatGameTime(game.gameDate)} · {game.venue}
                     </span>
-                    <span className="game-status">{game.status}</span>
+                    <span className="game-status">
+                      {game.status}
+                      {game.status === "Final" &&
+                      game.awayScore !== null &&
+                      game.homeScore !== null ? (
+                        <strong>{game.awayScore}-{game.homeScore}</strong>
+                      ) : null}
+                    </span>
                     <span className="game-action">View roster</span>
                   </button>
                 ))}

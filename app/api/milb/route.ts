@@ -27,6 +27,8 @@ type Game = {
   gamePk: number;
   gameDate: string;
   status: string;
+  awayScore: number | null;
+  homeScore: number | null;
   venue: string;
   level: string;
   away: TeamSummary;
@@ -910,6 +912,8 @@ function normalizeGame(value: unknown): Game | null {
     gamePk,
     gameDate,
     status: stringOf(objectOf(game.status).detailedState) || "Scheduled",
+    awayScore: numberOf(objectOf(teams.away).score) ?? null,
+    homeScore: numberOf(objectOf(teams.home).score) ?? null,
     venue: stringOf(objectOf(game.venue).name) || "Venue TBD",
     level: stringOf(objectOf(objectOf(objectOf(homeRaw(teams)).team).sport).name) || "MiLB",
     away,
