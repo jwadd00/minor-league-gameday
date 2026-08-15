@@ -9,7 +9,7 @@
     "TARGET_URL": "https://minor-league-gameday-scout.jwadd00.chatgpt.site"
   },
   "triggers": {
-    "crons": ["0 10,14,18,22 * * *"]
+    "crons": ["*/15 * * * *"]
   },
   "observability": {
     "enabled": true,

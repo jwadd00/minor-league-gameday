@@ -13,6 +13,8 @@ const SCHEDULE_TTL_MS = 3 * 60 * 1000;
 const ROSTER_TTL_MS = 15 * 60 * 1000;
 const PLAYER_META_TTL_MS = 21 * 24 * 60 * 60 * 1000;
 const FAILED_CARD_TTL_MS = 60 * 60 * 1000;
+const SNAPSHOT_RETENTION_DAYS = 400;
+const BACKFILL_MAX_ATTEMPTS = 4;
 
 type Dict = Record<string, unknown>;
 
@@ -209,7 +211,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
-    if (url.searchParams.get("view") !== "materialize") {
+    const view = url.searchParams.get("view");
+    if (view !== "materialize" && view !== "backfill") {
       return Response.json({ error: "Unknown view." }, { status: 400 });
     }
 
@@ -220,9 +223,16 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    return Response.json(
-      await materializeDailySnapshot(normalizeDate(url.searchParams.get("date"))),
-    );
+    if (view === "backfill") {
+      return Response.json(
+        await processNextBackfillDate(
+          normalizeDate(url.searchParams.get("start") ?? "2026-08-01"),
+          normalizeDate(url.searchParams.get("end") ?? "2026-08-31"),
+        ),
+      );
+    }
+
+    return Response.json(await materializeDailySnapshot(normalizeDate(url.searchParams.get("date"))));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error.";
     return Response.json({ error: message }, { status: 500 });
@@ -248,18 +258,27 @@ export async function materializeDailySnapshot(date: string) {
     team,
     players: await getBaseRoster(team, date, cache, true),
   }));
-  const teamSnapshots = baseSnapshots.map((entry) => ({
-    team: entry.team,
-    players: entry.players.map((player) =>
-      withExplicitMissingValues({ ...player, bioStatus: "fresh" }),
-    ),
-  }));
+  const uniquePlayers = Array.from(
+    new Map(
+      baseSnapshots
+        .flatMap((entry) => entry.players)
+        .map((player) => [player.id, player]),
+    ).values(),
+  );
+  await enrichPlayers(uniquePlayers, cache);
+  const teamSnapshots = await mapLimit(baseSnapshots, 8, async (entry) => {
+    const merged = await mergeCachedBio(entry.players, cache);
+    return {
+      team: entry.team,
+      players: merged.players.map(withExplicitMissingValues),
+    };
+  });
 
   const players = teamSnapshots.flatMap((entry) => entry.players);
   const unresolvedPlayers = players.filter(
     (player) => player.bioStatus !== "fresh",
   );
-  if (teams.length === 0 || players.length === 0) {
+  if (games.length > 0 && players.length === 0) {
     throw new Error("Snapshot validation failed because the schedule or rosters were empty.");
   }
   if (unresolvedPlayers.length > 0) {
@@ -303,10 +322,10 @@ export async function materializeDailySnapshot(date: string) {
       "DELETE FROM daily_team_snapshot WHERE date = ? AND generation <> ?",
     ).bind(date, generation),
     cache.db.prepare(
-      "DELETE FROM daily_team_snapshot WHERE date < date(?, '-3 days')",
+      `DELETE FROM daily_team_snapshot WHERE date < date(?, '-${SNAPSHOT_RETENTION_DAYS} days')`,
     ).bind(date),
     cache.db.prepare(
-      "DELETE FROM daily_snapshot_state WHERE date < date(?, '-3 days')",
+      `DELETE FROM daily_snapshot_state WHERE date < date(?, '-${SNAPSHOT_RETENTION_DAYS} days')`,
     ).bind(date),
   ]);
 
@@ -319,6 +338,83 @@ export async function materializeDailySnapshot(date: string) {
     missingSchool,
     builtAt,
   };
+}
+
+async function processNextBackfillDate(start: string, end: string) {
+  const cache = await getCacheStore();
+  if (!cache.db) {
+    throw new Error("Backfill requires the configured database.");
+  }
+
+  const cappedEnd = end < easternDate() ? end : easternDate();
+  if (start > cappedEnd) {
+    return { status: "waiting", message: "No completed dates are in the requested range." };
+  }
+
+  await seedBackfillDates(start, cappedEnd, cache.db);
+  const next = await cache.db
+    .prepare(
+      "SELECT date, attempts FROM backfill_day_state WHERE date >= ? AND date <= ? AND status = 'pending' ORDER BY date LIMIT 1",
+    )
+    .bind(start, cappedEnd)
+    .first<{ date: string; attempts: number }>();
+
+  if (!next) {
+    const remaining = await cache.db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM backfill_day_state WHERE date >= ? AND date <= ? AND status != 'complete'",
+      )
+      .bind(start, cappedEnd)
+      .first<{ count: number }>();
+    return { status: remaining?.count ? "blocked" : "complete", remaining: remaining?.count ?? 0 };
+  }
+
+  const now = Date.now();
+  const claim = await cache.db
+    .prepare(
+      "UPDATE backfill_day_state SET status = 'processing', attempts = attempts + 1, started_at = ?, updated_at = ? WHERE date = ? AND status = 'pending'",
+    )
+    .bind(now, now, next.date)
+    .run();
+
+  if (claim.meta.changes !== 1) {
+    return { status: "claimed_elsewhere", date: next.date };
+  }
+
+  try {
+    const snapshot = await materializeDailySnapshot(next.date);
+    const completedAt = Date.now();
+    await cache.db
+      .prepare(
+        "UPDATE backfill_day_state SET status = 'complete', completed_at = ?, last_error = '', updated_at = ? WHERE date = ?",
+      )
+      .bind(completedAt, completedAt, next.date)
+      .run();
+    return { status: "complete", date: next.date, snapshot };
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 500) : "Unexpected error.";
+    const failedAt = Date.now();
+    await cache.db
+      .prepare(
+        "UPDATE backfill_day_state SET status = CASE WHEN attempts >= ? THEN 'failed' ELSE 'pending' END, last_error = ?, updated_at = ? WHERE date = ?",
+      )
+      .bind(BACKFILL_MAX_ATTEMPTS, message, failedAt, next.date)
+      .run();
+    return { status: "retrying", date: next.date, error: message };
+  }
+}
+
+async function seedBackfillDates(start: string, end: string, db: D1Database) {
+  const statements = dateRange(start, end).map((date) =>
+    db
+      .prepare(
+        "INSERT INTO backfill_day_state (date, status, attempts, last_error, started_at, completed_at, updated_at) VALUES (?, 'pending', 0, '', 0, 0, ?) ON CONFLICT(date) DO NOTHING",
+      )
+      .bind(date, Date.now()),
+  );
+  for (const batch of chunkArray(statements, 50)) {
+    await db.batch(batch);
+  }
 }
 
 async function readDailySnapshot(
@@ -773,10 +869,14 @@ async function ensureSchema(db: D1Database) {
     db.prepare(
       "CREATE TABLE IF NOT EXISTS game_box_score_cache (game_pk INTEGER PRIMARY KEY, payload TEXT NOT NULL, fetched_at INTEGER NOT NULL)",
     ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS backfill_day_state (date TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL DEFAULT 0, completed_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)",
+    ),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_schedule_cache_expires_at ON schedule_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_roster_cache_expires_at ON roster_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_player_meta_cache_expires_at ON player_meta_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_daily_team_snapshot_lookup ON daily_team_snapshot (date, generation, team_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_backfill_day_state_status_date ON backfill_day_state (status, date)"),
     db.prepare("PRAGMA optimize"),
   ]);
 }
@@ -1529,6 +1629,26 @@ function normalizeDate(value: string | null) {
     return value;
   }
   return new Date().toISOString().slice(0, 10);
+}
+
+function easternDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function dateRange(start: string, end: string) {
+  const dates: string[] = [];
+  const cursor = new Date(`${start}T12:00:00Z`);
+  const last = new Date(`${end}T12:00:00Z`);
+  while (cursor <= last) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
 }
 
 function chunkArray<T>(items: T[], size: number) {

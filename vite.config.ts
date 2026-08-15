@@ -18,8 +18,7 @@ const localBindingConfig = {
     ? { CACHE_WARM_TOKEN: process.env.CACHE_WARM_TOKEN }
     : {},
   triggers: {
-    // 6am, 10am, 2pm, and 6pm Eastern during daylight time.
-    crons: ["0 10,14,18,22 * * *"],
+    crons: ["*/15 * * * *"],
   },
   d1_databases: d1
     ? [

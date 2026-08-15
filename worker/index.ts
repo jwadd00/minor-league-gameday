@@ -57,16 +57,29 @@ async function runScheduledSnapshot(env: Env, ctx: ExecutionContext) {
     throw new Error("CACHE_WARM_TOKEN is required for scheduled snapshots.");
   }
 
-  const request = new Request(
-    `https://gameday-scout.internal/api/milb?view=materialize&date=${easternDate()}`,
-    {
-      method: "POST",
-      headers: { "x-gameday-cache-token": env.CACHE_WARM_TOKEN },
-    },
+  const headers = { "x-gameday-cache-token": env.CACHE_WARM_TOKEN };
+  const snapshotResponse = await handler.fetch(
+    new Request(
+      `https://gameday-scout.internal/api/milb?view=materialize&date=${easternDate()}`,
+      { method: "POST", headers },
+    ),
+    env,
+    ctx,
   );
-  const response = await handler.fetch(request, env, ctx);
-  if (!response.ok) {
-    throw new Error(`Scheduled snapshot failed with status ${response.status}.`);
+  if (!snapshotResponse.ok) {
+    throw new Error(`Scheduled snapshot failed with status ${snapshotResponse.status}.`);
+  }
+
+  const backfillResponse = await handler.fetch(
+    new Request(
+      "https://gameday-scout.internal/api/milb?view=backfill&start=2026-08-01&end=2026-08-31",
+      { method: "POST", headers },
+    ),
+    env,
+    ctx,
+  );
+  if (!backfillResponse.ok) {
+    throw new Error(`Scheduled backfill failed with status ${backfillResponse.status}.`);
   }
 }
 

@@ -9,14 +9,18 @@ export default {
     env: SchedulerEnv,
     ctx: ExecutionContext,
   ): Promise<void> {
-    ctx.waitUntil(refreshDailySnapshot(env));
+    ctx.waitUntil(refreshScheduledData(env));
   },
 };
 
-async function refreshDailySnapshot(env: SchedulerEnv) {
-  const date = easternDate(new Date());
+async function refreshScheduledData(env: SchedulerEnv) {
+  await refreshCacheTask(env, `view=materialize&date=${easternDate(new Date())}`);
+  await refreshCacheTask(env, "view=backfill&start=2026-08-01&end=2026-08-31");
+}
+
+async function refreshCacheTask(env: SchedulerEnv, query: string) {
   const response = await fetch(
-    `${env.TARGET_URL}/api/milb?view=materialize&date=${date}`,
+    `${env.TARGET_URL}/api/milb?${query}`,
     {
       method: "POST",
       headers: {
@@ -27,10 +31,10 @@ async function refreshDailySnapshot(env: SchedulerEnv) {
   );
 
   if (!response.ok) {
-    throw new Error(`Snapshot refresh failed with status ${response.status}.`);
+    throw new Error(`Cache refresh failed with status ${response.status}.`);
   }
 
-  console.log(JSON.stringify({ event: "snapshot_refreshed", date }));
+  console.log(JSON.stringify({ event: "cache_refreshed", query }));
 }
 
 function easternDate(now: Date) {

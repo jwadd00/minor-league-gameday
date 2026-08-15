@@ -82,3 +82,17 @@ export const gameBoxScoreCache = sqliteTable("game_box_score_cache", {
   payload: text("payload").notNull(),
   fetchedAt: integer("fetched_at").notNull(),
 });
+
+export const backfillDayState = sqliteTable(
+  "backfill_day_state",
+  {
+    date: text("date").primaryKey(),
+    status: text("status").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error").notNull().default(""),
+    startedAt: integer("started_at").notNull().default(0),
+    completedAt: integer("completed_at").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [index("idx_backfill_day_state_status_date").on(table.status, table.date)],
+);
