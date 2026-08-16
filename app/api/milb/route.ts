@@ -15,6 +15,10 @@ const PLAYER_META_TTL_MS = 21 * 24 * 60 * 60 * 1000;
 const FAILED_CARD_TTL_MS = 60 * 60 * 1000;
 const SNAPSHOT_RETENTION_DAYS = 400;
 const BACKFILL_MAX_ATTEMPTS = 4;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const READ_RATE_LIMIT = 120;
+const ACTION_RATE_LIMIT = 30;
+const ADMIN_RATE_LIMIT = 20;
 
 type Dict = Record<string, unknown>;
 
@@ -168,7 +172,6 @@ type DailySnapshot = {
   players: Player[];
 };
 
-const cardCache = new Map<number, Promise<FetchedPlayerCard>>();
 const memorySchedule = new Map<string, CacheEntry<Game[]>>();
 const memoryRosters = new Map<string, CacheEntry<Player[]>>();
 const memoryPlayers = new Map<number, PlayerMetaRow>();
@@ -179,11 +182,31 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const view = url.searchParams.get("view") ?? "games";
-    const date = normalizeDate(url.searchParams.get("date"));
     const cache = await getCacheStore();
+    const rateLimited = await enforceRateLimit(
+      request,
+      view === "action" ? "action" : "read",
+      view === "action" ? ACTION_RATE_LIMIT : READ_RATE_LIMIT,
+      cache,
+    );
+    if (rateLimited) {
+      return rateLimited;
+    }
+
+    if (view === "dates") {
+      return snapshotJson({ dates: await listCachedDates(cache) });
+    }
+
+    const date = normalizeDate(url.searchParams.get("date"));
+    if (!date) {
+      return Response.json({ error: "A valid date is required." }, { status: 400 });
+    }
+    if (!(await isCachedDate(date, cache))) {
+      return dateUnavailable(date);
+    }
 
     if (view === "games") {
-      return Response.json({ games: await getGames(date, cache) });
+      return snapshotJson({ games: await getGames(date, cache, false, true) });
     }
 
     if (view === "game") {
@@ -204,7 +227,7 @@ export async function GET(request: Request) {
         return Response.json({ error: "gamePk is required." }, { status: 400 });
       }
 
-      const game = (await getGames(date, cache)).find((entry) => entry.gamePk === gamePk);
+      const game = (await getGames(date, cache, false, true)).find((entry) => entry.gamePk === gamePk);
       if (!game) {
         return Response.json({ error: "Game was not found for that date." }, { status: 404 });
       }
@@ -212,7 +235,10 @@ export async function GET(request: Request) {
         return Response.json({ error: "Box scores are available after a game is final." }, { status: 409 });
       }
 
-      return snapshotJson(await getGameBoxScore(game, cache));
+      const boxScore = await readGameBoxScore(game.gamePk, cache);
+      return boxScore
+        ? snapshotJson(boxScore)
+        : cachedBoxScoreUnavailable(date);
     }
 
     if (view === "players") {
@@ -254,23 +280,39 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unknown view." }, { status: 400 });
     }
 
-    const configuredToken = (env as unknown as { CACHE_WARM_TOKEN?: string })
-      .CACHE_WARM_TOKEN;
+    const cache = await getCacheStore();
+    const rateLimited = await enforceRateLimit(
+      request,
+      "admin",
+      ADMIN_RATE_LIMIT,
+      cache,
+    );
+    if (rateLimited) {
+      return rateLimited;
+    }
+
+    const configuredToken = (env as unknown as { CACHE_WARM_TOKEN?: string }).CACHE_WARM_TOKEN;
     const suppliedToken = request.headers.get("x-gameday-cache-token");
-    if (!configuredToken || suppliedToken !== configuredToken) {
+    if (!(await verifySecret(suppliedToken, configuredToken))) {
       return Response.json({ error: "Unauthorized." }, { status: 401 });
     }
 
     if (view === "backfill") {
+      const start = normalizeDate(url.searchParams.get("start") ?? "2026-08-01");
+      const end = normalizeDate(url.searchParams.get("end") ?? "2026-08-31");
+      if (!start || !end) {
+        return Response.json({ error: "A valid backfill date range is required." }, { status: 400 });
+      }
       return Response.json(
-        await processNextBackfillDate(
-          normalizeDate(url.searchParams.get("start") ?? "2026-08-01"),
-          normalizeDate(url.searchParams.get("end") ?? "2026-08-31"),
-        ),
+        await processNextBackfillDate(start, end),
       );
     }
 
-    return Response.json(await materializeDailySnapshot(normalizeDate(url.searchParams.get("date"))));
+    const date = normalizeDate(url.searchParams.get("date"));
+    if (!date) {
+      return Response.json({ error: "A valid date is required." }, { status: 400 });
+    }
+    return Response.json(await materializeDailySnapshot(date));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error.";
     return Response.json({ error: message }, { status: 500 });
@@ -365,6 +407,9 @@ export async function materializeDailySnapshot(date: string) {
     cache.db.prepare(
       `DELETE FROM daily_snapshot_state WHERE date < date(?, '-${SNAPSHOT_RETENTION_DAYS} days')`,
     ).bind(date),
+    cache.db.prepare(
+      "DELETE FROM api_rate_limit WHERE window_start < ?",
+    ).bind(Date.now() - 15 * RATE_LIMIT_WINDOW_MS),
   ]);
 
   return {
@@ -510,7 +555,7 @@ async function getSnapshotGameDetail(
   cache: CacheStore,
 ) {
   const [games, snapshot] = await Promise.all([
-    getGames(date, cache),
+    getGames(date, cache, false, true),
     readDailySnapshot(date, cache),
   ]);
   const game = games.find((entry) => entry.gamePk === gamePk);
@@ -543,6 +588,26 @@ function snapshotUnavailable(date: string) {
   );
 }
 
+function dateUnavailable(date: string) {
+  return Response.json(
+    {
+      error: `No verified cached data is available for ${date}.`,
+      code: "DATE_NOT_CACHED",
+    },
+    { status: 404 },
+  );
+}
+
+function cachedBoxScoreUnavailable(date: string) {
+  return Response.json(
+    {
+      error: `The cached box score for ${date} is not ready yet.`,
+      code: "BOX_SCORE_NOT_CACHED",
+    },
+    { status: 503, headers: { "retry-after": "60" } },
+  );
+}
+
 function snapshotJson(payload: unknown) {
   return Response.json(payload, {
     headers: {
@@ -551,65 +616,14 @@ function snapshotJson(payload: unknown) {
   });
 }
 
-async function getGameDetail(
-  date: string,
-  gamePk: number,
-  cache: CacheStore,
-  enrich: boolean,
-) {
-  const games = await getGames(date, cache);
-  const game = games.find((entry) => entry.gamePk === gamePk);
-  if (!game) {
-    throw new Error("Game was not found for that date.");
-  }
-
-  const teams = await Promise.all(
-    [game.away, game.home].map(async (team) => {
-      const roster = await getRoster(team, date, cache, false);
-      const refreshedBio = enrich ? await enrichPlayers(roster.players, cache) : 0;
-      const merged = enrich && refreshedBio > 0
-        ? await mergeCachedBio(await getBaseRoster(team, date, cache), cache)
-        : roster;
-
-      return {
-        team,
-        players: merged.players,
-        cacheInfo: {
-          ...merged.cacheInfo,
-          refreshedBio,
-        },
-      };
-    }),
-  );
-
-  return {
-    game,
-    teams,
-    cacheInfo: teams.reduce<CacheInfo>(
-      (summary, team) => ({
-        totalPlayers: summary.totalPlayers + team.cacheInfo.totalPlayers,
-        freshBio: summary.freshBio + team.cacheInfo.freshBio,
-        staleBio: summary.staleBio + team.cacheInfo.staleBio,
-        missingBio: summary.missingBio + team.cacheInfo.missingBio,
-        refreshedBio:
-          (summary.refreshedBio ?? 0) + (team.cacheInfo.refreshedBio ?? 0),
-      }),
-      { totalPlayers: 0, freshBio: 0, staleBio: 0, missingBio: 0, refreshedBio: 0 },
-    ),
-  };
-}
-
-async function enrichGameBio(date: string, gamePk: number, cache: CacheStore) {
-  await getGameDetail(date, gamePk, cache, true);
-}
-
 async function getGames(
   date: string,
   cache: CacheStore,
   forceRefresh = false,
+  allowStale = false,
 ): Promise<Game[]> {
   const cached = await readScheduleCache(date, cache);
-  if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+  if (!forceRefresh && cached && (allowStale || cached.expiresAt > Date.now())) {
     return cached.payload;
   }
 
@@ -639,7 +653,7 @@ async function getActionPlayers(
   snapshot: DailySnapshot | null,
   cache: CacheStore,
 ): Promise<ActionPlayer[]> {
-  const games = (await getGames(date, cache)).filter(
+  const games = (await getGames(date, cache, false, true)).filter(
     (game) => !/scheduled|preview|postponed|cancelled/i.test(game.status),
   );
   const snapshotByPlayer = new Map<string, Player>();
@@ -649,21 +663,27 @@ async function getActionPlayers(
   }
 
   const gamePlayers = await mapLimit(games, 8, async (game) => {
-    const boxscore = await statsApi(
-      `/game/${game.gamePk}/boxscore?hydrate=person(draft,education)`,
-    );
-    const teams = objectOf(boxscore.teams);
+    const boxScore = await readGameBoxScore(game.gamePk, cache);
+    if (!boxScore) {
+      return [];
+    }
 
-    return ([
-      { side: "away", opponent: game.home.shortName || game.home.name },
-      { side: "home", opponent: game.away.shortName || game.away.name },
-    ] as const).flatMap(({ side, opponent }) => {
-      const boxTeam = objectOf(teams[side]);
-      const team = side === "away" ? game.away : game.home;
+    return boxScore.teams.flatMap(({ team, batting, pitching }) => {
+      const opponent = team.id === game.away.id
+        ? game.home.shortName || game.home.name
+        : game.away.shortName || game.away.name;
+      const lines = new Map<number, { batting?: BoxScoreLine; pitching?: BoxScoreLine }>();
 
-      return Object.values(objectOf(boxTeam.players))
-        .map((entry) => normalizeActionPlayer(
-          objectOf(entry),
+      for (const line of batting) {
+        lines.set(line.playerId, { ...lines.get(line.playerId), batting: line });
+      }
+      for (const line of pitching) {
+        lines.set(line.playerId, { ...lines.get(line.playerId), pitching: line });
+      }
+
+      return Array.from(lines.values())
+        .map((entry) => cachedActionPlayer(
+          entry,
           team,
           opponent,
           game.gamePk,
@@ -678,42 +698,36 @@ async function getActionPlayers(
     .sort((a, b) => a.name.localeCompare(b.name) || a.gamePk - b.gamePk);
 }
 
-function normalizeActionPlayer(
-  entry: Dict,
+function cachedActionPlayer(
+  lines: { batting?: BoxScoreLine; pitching?: BoxScoreLine },
   team: TeamSummary,
   opponent: string,
   gamePk: number,
   snapshotByPlayer: Map<string, Player>,
 ): ActionPlayer | null {
-  const person = objectOf(entry.person);
-  const id = numberOf(person.id);
-  const name = stringOf(person.fullName);
-  const stats = normalizeGameStats(objectOf(entry.stats));
-
-  if (!id || !name || (!stats.batting && !stats.pitching)) {
+  const line = lines.batting ?? lines.pitching;
+  if (!line) {
     return null;
   }
 
   const snapshotPlayer =
-    snapshotByPlayer.get(`${team.id}:${id}`) ??
-    snapshotByPlayer.get(`player:${id}`);
-  const education = extractEducation(person);
-  const draft = extractDraft(person);
+    snapshotByPlayer.get(`${team.id}:${line.playerId}`) ??
+    snapshotByPlayer.get(`player:${line.playerId}`);
   const fallback: Player = {
-    id,
-    name,
+    id: line.playerId,
+    name: line.name,
     teamId: team.id,
     teamName: team.shortName || team.name,
-    position: stringOf(objectOf(entry.position).abbreviation),
-    number: stringOf(entry.jerseyNumber),
-    status: stringOf(objectOf(entry.status).description),
-    draft: draft || "Not listed by MiLB",
-    school: education.school || "Not listed by MiLB",
-    schoolType: education.schoolType || "Not listed",
-    birthCity: stringOf(person.birthCity) || "Not listed",
-    birthState: stringOf(person.birthStateProvince),
-    birthCountry: stringOf(person.birthCountry) || "Not listed",
-    milbUrl: `https://www.milb.com/player/${id}`,
+    position: line.position,
+    number: "",
+    status: "",
+    draft: "Not listed by MiLB",
+    school: "Not listed by MiLB",
+    schoolType: "Not listed",
+    birthCity: "Not listed",
+    birthState: "",
+    birthCountry: "Not listed",
+    milbUrl: `https://www.milb.com/player/${line.playerId}`,
   };
 
   return {
@@ -721,62 +735,35 @@ function normalizeActionPlayer(
     ...snapshotPlayer,
     teamId: team.id,
     teamName: team.shortName || team.name,
-    position:
-      stringOf(objectOf(entry.position).abbreviation) || snapshotPlayer?.position || "",
-    number: stringOf(entry.jerseyNumber) || snapshotPlayer?.number || "",
+    position: line.position || snapshotPlayer?.position || "",
     gamePk,
     opponent,
-    stats,
+    stats: {
+      batting: lines.batting?.batting
+        ? {
+            summary: "",
+            atBats: lines.batting.batting.atBats,
+            hits: lines.batting.batting.hits,
+            runs: lines.batting.batting.runs,
+            rbi: lines.batting.batting.rbi,
+            homeRuns: lines.batting.batting.homeRuns,
+            baseOnBalls: lines.batting.batting.walks,
+            strikeOuts: lines.batting.batting.strikeOuts,
+          }
+        : undefined,
+      pitching: lines.pitching?.pitching
+        ? {
+            summary: "",
+            inningsPitched: lines.pitching.pitching.inningsPitched,
+            hits: lines.pitching.pitching.hits,
+            runs: lines.pitching.pitching.runs,
+            earnedRuns: lines.pitching.pitching.earnedRuns,
+            baseOnBalls: lines.pitching.pitching.walks,
+            strikeOuts: lines.pitching.pitching.strikeOuts,
+          }
+        : undefined,
+    },
   };
-}
-
-function normalizeGameStats(value: Dict): GameStats {
-  const batting = objectOf(value.batting);
-  const pitching = objectOf(value.pitching);
-  const battingPlayed = statNumber(batting.gamesPlayed) > 0;
-  const pitchingPlayed =
-    statNumber(pitching.gamesPitched) > 0 || statNumber(pitching.outs) > 0;
-
-  return {
-    batting: battingPlayed
-      ? {
-          summary: stringOf(batting.summary),
-          atBats: statNumber(batting.atBats),
-          hits: statNumber(batting.hits),
-          runs: statNumber(batting.runs),
-          rbi: statNumber(batting.rbi),
-          homeRuns: statNumber(batting.homeRuns),
-          baseOnBalls: statNumber(batting.baseOnBalls),
-          strikeOuts: statNumber(batting.strikeOuts),
-        }
-      : undefined,
-    pitching: pitchingPlayed
-      ? {
-          summary: stringOf(pitching.summary),
-          inningsPitched: stringOf(pitching.inningsPitched),
-          hits: statNumber(pitching.hits),
-          runs: statNumber(pitching.runs),
-          earnedRuns: statNumber(pitching.earnedRuns),
-          baseOnBalls: statNumber(pitching.baseOnBalls),
-          strikeOuts: statNumber(pitching.strikeOuts),
-        }
-      : undefined,
-  };
-}
-
-function statNumber(value: unknown) {
-  const result = numberOf(value);
-  return Number.isFinite(result) ? result : 0;
-}
-
-async function getRoster(
-  team: TeamSummary,
-  date: string,
-  cache: CacheStore,
-  forceRosterRefresh: boolean,
-): Promise<{ players: Player[]; cacheInfo: CacheInfo }> {
-  const players = await getBaseRoster(team, date, cache, forceRosterRefresh);
-  return mergeCachedBio(players, cache);
 }
 
 async function getBaseRoster(
@@ -923,19 +910,6 @@ async function enrichPlayers(
   return refreshed.reduce((sum, item) => sum + item, 0);
 }
 
-async function getOfficialPlayerCard(playerId: number): Promise<FetchedPlayerCard> {
-  const cached = cardCache.get(playerId);
-  if (cached) {
-    return cached;
-  }
-
-  const promise = fetchPlayerCardBatch([playerId]).then(
-    (cards) => cards.get(playerId) ?? { checked: false },
-  );
-  cardCache.set(playerId, promise);
-  return promise;
-}
-
 async function fetchPlayerCardBatch(playerIds: number[], errors: string[] = []) {
   const uniqueIds = Array.from(new Set(playerIds)).filter(Number.isFinite);
 
@@ -1022,6 +996,100 @@ async function getCacheStore(): Promise<CacheStore> {
   return { db };
 }
 
+async function listCachedDates(cache: CacheStore) {
+  if (!cache.db) {
+    return [];
+  }
+
+  const rows = await cache.db
+    .prepare(
+      "SELECT date FROM daily_snapshot_state ORDER BY date DESC LIMIT ?",
+    )
+    .bind(SNAPSHOT_RETENTION_DAYS)
+    .all<{ date: string }>();
+
+  return (rows.results ?? []).map((row) => row.date);
+}
+
+async function isCachedDate(date: string, cache: CacheStore) {
+  if (!cache.db) {
+    return false;
+  }
+
+  const row = await cache.db
+    .prepare("SELECT 1 AS cached FROM daily_snapshot_state WHERE date = ?")
+    .bind(date)
+    .first<{ cached: number }>();
+  return row?.cached === 1;
+}
+
+async function enforceRateLimit(
+  request: Request,
+  bucket: string,
+  limit: number,
+  cache: CacheStore,
+): Promise<Response | null> {
+  const clientIp = request.headers.get("cf-connecting-ip");
+  if (!cache.db || !clientIp) {
+    return null;
+  }
+
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${bucket}:${clientIp}`),
+  );
+  const clientKey = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  const windowStart = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_WINDOW_MS;
+
+  try {
+    const row = await cache.db
+      .prepare(
+        "INSERT INTO api_rate_limit (client_key, bucket, window_start, request_count) VALUES (?, ?, ?, 1) ON CONFLICT(client_key, bucket, window_start) DO UPDATE SET request_count = request_count + 1 RETURNING request_count",
+      )
+      .bind(clientKey, bucket, windowStart)
+      .first<{ request_count: number }>();
+
+    if ((row?.request_count ?? 1) <= limit) {
+      return null;
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "rate_limit_check_failed",
+      message: error instanceof Error ? error.message : "Unexpected error",
+    }));
+    return null;
+  }
+
+  return Response.json(
+    { error: "Too many requests. Please try again shortly.", code: "RATE_LIMITED" },
+    {
+      status: 429,
+      headers: {
+        "cache-control": "no-store",
+        "retry-after": String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)),
+      },
+    },
+  );
+}
+
+async function verifySecret(provided?: string | null, expected?: string | null) {
+  if (!provided || !expected) {
+    return false;
+  }
+
+  const encoder = new TextEncoder();
+  const [providedHash, expectedHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  const subtle = crypto.subtle as SubtleCrypto & {
+    timingSafeEqual(left: BufferSource, right: BufferSource): boolean;
+  };
+  return subtle.timingSafeEqual(providedHash, expectedHash);
+}
+
 async function ensureSchema(db: D1Database) {
   await db.batch([
     db.prepare(
@@ -1045,11 +1113,15 @@ async function ensureSchema(db: D1Database) {
     db.prepare(
       "CREATE TABLE IF NOT EXISTS backfill_day_state (date TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL DEFAULT 0, completed_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)",
     ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS api_rate_limit (client_key TEXT NOT NULL, bucket TEXT NOT NULL, window_start INTEGER NOT NULL, request_count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (client_key, bucket, window_start))",
+    ),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_schedule_cache_expires_at ON schedule_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_roster_cache_expires_at ON roster_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_player_meta_cache_expires_at ON player_meta_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_daily_team_snapshot_lookup ON daily_team_snapshot (date, generation, team_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_backfill_day_state_status_date ON backfill_day_state (status, date)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_api_rate_limit_window_start ON api_rate_limit (window_start)"),
     db.prepare("PRAGMA optimize"),
   ]);
 }
@@ -1241,10 +1313,6 @@ async function readPlayerMetas(playerIds: number[], cache: CacheStore) {
   }
 
   return rows;
-}
-
-async function writePlayerMeta(row: PlayerMetaRow, cache: CacheStore) {
-  await writePlayerMetas([row], cache);
 }
 
 async function writePlayerMetas(rows: PlayerMetaRow[], cache: CacheStore) {
@@ -1466,92 +1534,6 @@ function formatDraft(draft: Dict, person: Dict) {
   return year ? `${year} Draft` : "";
 }
 
-function extractCardDetails(html: string): Partial<PlayerCard> {
-  const text = htmlToText(html);
-  const draft = fieldAfter(text, "Draft", [
-    "College",
-    "High School",
-    "Relationship",
-    "Relationship(s)",
-    "Follow",
-    "Latest Transactions",
-    "Stats",
-    "2026 Stats",
-    "MiLB Career Stats",
-  ]);
-  const college = fieldAfter(text, "College", [
-    "High School",
-    "Relationship",
-    "Relationship(s)",
-    "Follow",
-    "Latest Transactions",
-    "Stats",
-    "2026 Stats",
-    "MiLB Career Stats",
-  ]);
-  const highSchool = fieldAfter(text, "High School", [
-    "College",
-    "Relationship",
-    "Relationship(s)",
-    "Follow",
-    "Latest Transactions",
-    "Stats",
-    "2026 Stats",
-    "MiLB Career Stats",
-  ]);
-  const born = fieldAfter(text, "Born", [
-    "Draft",
-    "College",
-    "High School",
-    "Relationship",
-    "Relationship(s)",
-    "Follow",
-    "2026 Stats",
-    "MiLB Career Stats",
-  ]);
-  const birthplace = parseBirthplace(born);
-
-  return {
-    draft,
-    school: college || highSchool,
-    schoolType: college ? "College" : highSchool ? "High School" : "",
-    ...birthplace,
-  };
-}
-
-function htmlToText(html: string) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function fieldAfter(text: string, label: string, nextLabels: string[]) {
-  const marker = `${label}:`;
-  const start = text.indexOf(marker);
-  if (start === -1) {
-    return "";
-  }
-
-  const after = text.slice(start + marker.length).trim();
-  const stops = nextLabels
-    .flatMap((next) => {
-      const withColon = after.indexOf(`${next}:`);
-      const plain = after.indexOf(` ${next} `);
-      return [withColon, plain];
-    })
-    .filter((index) => index > 0);
-  const end = stops.length ? Math.min(...stops) : after.length;
-
-  return cleanField(after.slice(0, end));
-}
-
 function cleanField(value: string) {
   return value
     .replace(/\s+\d{4}\s+Stats\b.*$/i, "")
@@ -1561,24 +1543,6 @@ function cleanField(value: string) {
     .replace(/\s+\|\s+.*$/, "")
     .replace(/\s{2,}/g, " ")
     .trim();
-}
-
-function parseBirthplace(value: string): Partial<PlayerCard> {
-  const location = value.match(/\bin\s+(.+)$/i)?.[1] ?? "";
-  const parts = location.split(",").map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length === 0) {
-    return {};
-  }
-
-  const region = parts[1] ?? "";
-  const looksLikeState = /^[A-Z]{2}$/.test(region);
-
-  return {
-    birthCity: parts[0] ?? "",
-    birthState: looksLikeState ? region : "",
-    birthCountry: looksLikeState ? (parts[2] ?? "") : region,
-  };
 }
 
 function extractEducation(person: Dict) {
@@ -1687,11 +1651,6 @@ function uniqueTeams(games: Game[]) {
   return Array.from(teams.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function isComplexLeagueGame(game: Game) {
-  const text = `${game.away.name} ${game.home.name} ${game.away.abbreviation} ${game.home.abbreviation}`;
-  return /\b(DSL|ACL|FCL)\b/i.test(text) || game.level === "Rookie";
-}
-
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
@@ -1742,17 +1701,6 @@ function isNotListed(value: string) {
   return !value || value === "Not listed by MiLB" || value === "Not listed";
 }
 
-function hasUsefulBio(card: Partial<PlayerCard>) {
-  return Boolean(
-    card.draft ||
-      card.school ||
-      card.schoolType ||
-      card.birthCity ||
-      card.birthState ||
-      card.birthCountry,
-  );
-}
-
 function isFailedMeta(meta: PlayerMetaRow) {
   return meta.failCount > 0;
 }
@@ -1793,15 +1741,19 @@ function summarizePlayers(players: Player[]): CacheInfo {
   );
 }
 
-function shouldRefreshBio(cacheInfo: CacheInfo) {
-  return cacheInfo.missingBio + cacheInfo.staleBio > 0;
-}
-
 function normalizeDate(value: string | null) {
-  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
+  const candidate = value ?? easternDate();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
+    return "";
   }
-  return new Date().toISOString().slice(0, 10);
+
+  const [year, month, day] = candidate.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+    ? candidate
+    : "";
 }
 
 function easternDate() {

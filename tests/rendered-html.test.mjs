@@ -209,7 +209,10 @@ test("loads prior-day player action with box-score stats and shared filters", as
   assert.match(client, /onClick=\{\(\) => moveDisplayedDate\(-1\)\}/);
   assert.match(client, /onClick=\{\(\) => moveDisplayedDate\(1\)\}/);
   assert.match(client, /value=\{displayedDate\}/);
-  assert.match(client, /activeTab === "action" \? "Action date" : "Date"/);
+  assert.match(client, /activeTab === "action" \? "Cached action date" : "Cached date"/);
+  assert.match(client, /getJson<CachedDates>\("\/api\/milb\?view=dates"\)/);
+  assert.match(client, /availableDates\.includes\(value\)/);
+  assert.match(client, /disabled=\{displayedDateIndex <= 0\}/);
   assert.match(client, /view=action&date=\$\{actionDate\}/);
   assert.match(client, /Yesterday&?apos;?s Action|Yesterday's Action/);
   assert.match(client, /\{ key: "stats", label: "Stats" \}/);
@@ -217,16 +220,35 @@ test("loads prior-day player action with box-score stats and shared filters", as
   assert.match(client, /<strong>BAT<\/strong>/);
   assert.match(client, /<strong>PITCH<\/strong>/);
   assert.match(route, /if \(view === "action"\)/);
-  assert.match(
-    route,
-    /`\/game\/\$\{game\.gamePk\}\/boxscore\?hydrate=person\(draft,education\)`/,
-  );
+  assert.match(route, /const boxScore = await readGameBoxScore\(game\.gamePk, cache\)/);
+  assert.match(route, /function cachedActionPlayer/);
+  assert.doesNotMatch(route, /boxscore\?hydrate=person\(draft,education\)/);
   assert.match(route, /snapshot: snapshot\?\.state \?\? null/);
   assert.doesNotMatch(
     route,
     /if \(view === "action"\)[\s\S]*?return snapshotUnavailable\(date\)/,
   );
-  assert.match(route, /normalizeGameStats/);
   assert.match(css, /\.col-stats/);
   assert.match(css, /\.game-stat-lines/);
+});
+
+test("serves only verified cached dates and rate-limits anonymous traffic", async () => {
+  const [client, route, schema, migration] = await Promise.all([
+    readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0004_youthful_mac_gargan.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(route, /if \(view === "dates"\)/);
+  assert.match(route, /SELECT date FROM daily_snapshot_state ORDER BY date DESC/);
+  assert.match(route, /if \(!\(await isCachedDate\(date, cache\)\)\)/);
+  assert.match(route, /code: "DATE_NOT_CACHED"/);
+  assert.match(route, /const ACTION_RATE_LIMIT = 30/);
+  assert.match(route, /code: "RATE_LIMITED"/);
+  assert.match(route, /timingSafeEqual/);
+  assert.match(schema, /apiRateLimit/);
+  assert.match(migration, /CREATE TABLE `api_rate_limit`/);
+  assert.match(client, /<select[\s\S]*?availableDates\.map/);
+  assert.doesNotMatch(client, /type="date"/);
 });

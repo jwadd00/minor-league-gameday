@@ -130,6 +130,10 @@ type ActionIndex = {
   gameCount: number;
 };
 
+type CachedDates = {
+  dates: string[];
+};
+
 type ApiState<T> = {
   status: "idle" | "loading" | "ready" | "error";
   data?: T;
@@ -169,8 +173,6 @@ const GAME_CATEGORIES: Array<{ value: GameCategory; label: string }> = [
   { value: "Single-A", label: "Single-A" },
   { value: "Rookie", label: "Rookie" },
 ];
-
-const LEVEL_ORDER = ["Triple-A", "Double-A", "High-A", "Single-A", "Rookie"];
 
 const PLAYER_COLUMNS: Array<{ key: PlayerSortKey; label: string }> = [
   { key: "name", label: "Player" },
@@ -334,11 +336,54 @@ export function GamedayApp() {
   const [actionPlayers, setActionPlayers] = useState<ApiState<ActionIndex>>({
     status: "idle",
   });
+  const [cachedDates, setCachedDates] = useState<ApiState<CachedDates>>({
+    status: "loading",
+  });
   const [gameQuery, setGameQuery] = useState("");
   const [gameCategory, setGameCategory] = useState<GameCategory>("fullSeason");
 
+  const availableDates = useMemo(
+    () => [...(cachedDates.data?.dates ?? [])].sort(),
+    [cachedDates.data?.dates],
+  );
+
   useEffect(() => {
     let cancelled = false;
+
+    getJson<CachedDates>("/api/milb?view=dates")
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+
+        const dates = [...payload.dates].sort();
+        const latest = dates.at(-1) ?? "";
+        const today = todayValue();
+        const yesterday = previousDate(today);
+        const latestCompleted = [...dates].reverse().find((value) => value <= yesterday) ?? latest;
+        setCachedDates({ status: "ready", data: { dates } });
+        setDate((current) => dates.includes(current) ? current : (dates.includes(today) ? today : latest));
+        setActionDate((current) => dates.includes(current) ? current : latestCompleted);
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setCachedDates({ status: "error", error: error.message });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cachedDates.status !== "ready" || !availableDates.includes(date)) {
+      return;
+    }
+
+    let cancelled = false;
+    // Loading must reset immediately when the selected cached date changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGames({ status: "loading" });
     setSelectedGamePk(null);
     setGameDetail({ status: "idle" });
@@ -372,14 +417,20 @@ export function GamedayApp() {
     return () => {
       cancelled = true;
     };
-  }, [date]);
+  }, [availableDates, cachedDates.status, date]);
 
   useEffect(() => {
-    if (activeTab !== "action") {
+    if (
+      activeTab !== "action" ||
+      cachedDates.status !== "ready" ||
+      !availableDates.includes(actionDate)
+    ) {
       return;
     }
 
     let cancelled = false;
+    // Loading must reset immediately when the selected action date changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActionPlayers({ status: "loading" });
 
     getJson<ActionIndex>(`/api/milb?view=action&date=${actionDate}`)
@@ -397,7 +448,7 @@ export function GamedayApp() {
     return () => {
       cancelled = true;
     };
-  }, [actionDate, activeTab]);
+  }, [actionDate, activeTab, availableDates, cachedDates.status]);
 
   useEffect(() => {
     if (!selectedGamePk) {
@@ -405,6 +456,8 @@ export function GamedayApp() {
     }
 
     let cancelled = false;
+    // Loading must reset immediately when the selected game changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGameDetail({ status: "loading" });
 
     getJson<GameDetail>(`/api/milb?view=game&date=${date}&gamePk=${selectedGamePk}`)
@@ -429,6 +482,8 @@ export function GamedayApp() {
 
   useEffect(() => {
     if (!selectedGame || selectedGame.status !== "Final") {
+      // The selected game no longer has a box score to display.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBoxScore({ status: "idle" });
       return;
     }
@@ -477,16 +532,20 @@ export function GamedayApp() {
   }
 
   const displayedDate = activeTab === "action" ? actionDate : date;
+  const displayedDateIndex = availableDates.indexOf(displayedDate);
 
   function moveDisplayedDate(days: number) {
-    if (activeTab === "action") {
-      setActionDate((current) => shiftDate(current, days));
-    } else {
-      setDate((current) => shiftDate(current, days));
+    const nextDate = availableDates[displayedDateIndex + days];
+    if (!nextDate) {
+      return;
     }
+    updateDisplayedDate(nextDate);
   }
 
   function updateDisplayedDate(value: string) {
+    if (!availableDates.includes(value)) {
+      return;
+    }
     if (activeTab === "action") {
       setActionDate(value);
     } else {
@@ -524,20 +583,6 @@ export function GamedayApp() {
       );
     });
   }, [gameCategory, gameQuery, games.data]);
-
-  const gameGroups = useMemo(() => {
-    const groups = new Map<string, Game[]>();
-    for (const game of filteredGames) {
-      const label = isComplexLeagueGame(game) ? "Complex/Rookie" : game.level;
-      groups.set(label, [...(groups.get(label) ?? []), game]);
-    }
-
-    return Array.from(groups.entries()).sort(([a], [b]) => {
-      const left = a === "Complex/Rookie" ? 99 : LEVEL_ORDER.indexOf(a);
-      const right = b === "Complex/Rookie" ? 99 : LEVEL_ORDER.indexOf(b);
-      return (left === -1 ? 50 : left) - (right === -1 ? 50 : right);
-    });
-  }, [filteredGames]);
 
   const categoryCounts = useMemo(() => {
     const rows = games.data ?? [];
@@ -598,21 +643,32 @@ export function GamedayApp() {
             type="button"
             aria-label="Previous day"
             onClick={() => moveDisplayedDate(-1)}
+            disabled={displayedDateIndex <= 0}
           >
             ‹
           </button>
           <label>
-            <span>{activeTab === "action" ? "Action date" : "Date"}</span>
-            <input
-              type="date"
+            <span>{activeTab === "action" ? "Cached action date" : "Cached date"}</span>
+            <select
               value={displayedDate}
               onChange={(event) => updateDisplayedDate(event.target.value)}
-            />
+              disabled={cachedDates.status !== "ready" || availableDates.length === 0}
+            >
+              {availableDates.length === 0 ? (
+                <option value="">
+                  {cachedDates.status === "error" ? "Dates unavailable" : "Loading dates..."}
+                </option>
+              ) : null}
+              {availableDates.map((value) => (
+                <option key={value} value={value}>{labelForDate(value)}</option>
+              ))}
+            </select>
           </label>
           <button
             type="button"
             aria-label="Next day"
             onClick={() => moveDisplayedDate(1)}
+            disabled={displayedDateIndex < 0 || displayedDateIndex >= availableDates.length - 1}
           >
             ›
           </button>
@@ -907,58 +963,6 @@ function gameStatsByPlayer(boxScore: BoxScore) {
   }
 
   return stats;
-}
-
-function PlayerTable({ players }: { players: Player[] }) {
-  if (players.length === 0) {
-    return (
-      <EmptyState
-        title="No players match"
-        text="Clear a filter or try a broader search term."
-      />
-    );
-  }
-
-  return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Player</th>
-            <th>Team</th>
-            <th>Pos</th>
-            <th>No.</th>
-            <th>Draft Spot</th>
-            <th>College or High School</th>
-            <th>Birth City</th>
-            <th>State</th>
-          </tr>
-        </thead>
-        <tbody>
-          {players.map((player) => (
-            <tr key={`${player.teamId}-${player.id}`}>
-              <td>
-                <a href={player.milbUrl} target="_blank" rel="noreferrer">
-                  {player.name}
-                </a>
-                <span>{player.status}</span>
-              </td>
-              <td>{player.teamName}</td>
-              <td>{player.position || "—"}</td>
-              <td>{player.number || "—"}</td>
-              <td>{player.draft || "—"}</td>
-              <td>
-                {player.school || "—"}
-                {player.schoolType ? <span>{player.schoolType}</span> : null}
-              </td>
-              <td>{player.birthCity || "—"}</td>
-              <td>{player.birthState || player.birthCountry || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
 }
 
 function PlayerFinder({

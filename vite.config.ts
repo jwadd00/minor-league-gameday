@@ -10,13 +10,15 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+const localVars: Record<string, string> = {};
+if (process.env.CACHE_WARM_TOKEN) {
+  localVars.CACHE_WARM_TOKEN = process.env.CACHE_WARM_TOKEN;
+}
 
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  vars: process.env.CACHE_WARM_TOKEN
-    ? { CACHE_WARM_TOKEN: process.env.CACHE_WARM_TOKEN }
-    : {},
+  vars: localVars,
   triggers: {
     crons: ["*/15 * * * *"],
   },

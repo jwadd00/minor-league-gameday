@@ -257,6 +257,12 @@ h2 {
   box-shadow: 0 0 22px rgba(77, 232, 255, 0.28);
 }
 
+.date-control button:disabled {
+  opacity: 0.34;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .date-control label,
 .filters label,
 .game-tools label,
@@ -276,7 +282,7 @@ h2 {
   text-transform: uppercase;
 }
 
-.date-control input,
+.date-control select,
 .filters input,
 .filters select,
 .game-tools input,
@@ -292,7 +298,7 @@ h2 {
   outline: none;
 }
 
-.date-control input {
+.date-control select {
   min-height: 50px;
   border-color: rgba(77, 232, 255, 0.22);
 }

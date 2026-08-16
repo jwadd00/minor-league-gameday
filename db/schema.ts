@@ -96,3 +96,17 @@ export const backfillDayState = sqliteTable(
   },
   (table) => [index("idx_backfill_day_state_status_date").on(table.status, table.date)],
 );
+
+export const apiRateLimit = sqliteTable(
+  "api_rate_limit",
+  {
+    clientKey: text("client_key").notNull(),
+    bucket: text("bucket").notNull(),
+    windowStart: integer("window_start").notNull(),
+    requestCount: integer("request_count").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.clientKey, table.bucket, table.windowStart] }),
+    index("idx_api_rate_limit_window_start").on(table.windowStart),
+  ],
+);
