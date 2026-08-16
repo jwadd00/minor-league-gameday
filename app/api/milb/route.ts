@@ -55,6 +55,34 @@ type Player = {
   bioStatus?: BioStatus;
 };
 
+type GameStats = {
+  batting?: {
+    summary: string;
+    atBats: number;
+    hits: number;
+    runs: number;
+    rbi: number;
+    homeRuns: number;
+    baseOnBalls: number;
+    strikeOuts: number;
+  };
+  pitching?: {
+    summary: string;
+    inningsPitched: string;
+    hits: number;
+    runs: number;
+    earnedRuns: number;
+    baseOnBalls: number;
+    strikeOuts: number;
+  };
+};
+
+type ActionPlayer = Player & {
+  gamePk: number;
+  opponent: string;
+  stats: GameStats;
+};
+
 type PlayerCard = Pick<
   Player,
   "draft" | "school" | "schoolType" | "birthCity" | "birthState" | "birthCountry"
@@ -143,6 +171,20 @@ export async function GET(request: Request) {
         players: snapshot.players,
         teamCount: snapshot.state.teamCount,
         cacheInfo: summarizePlayers(snapshot.players),
+        snapshot: snapshot.state,
+      });
+    }
+
+    if (view === "action") {
+      const snapshot = await readDailySnapshot(date, cache);
+      if (!snapshot) {
+        return snapshotUnavailable(date);
+      }
+
+      const players = await getActionPlayers(date, snapshot, cache);
+      return snapshotJson({
+        players,
+        gameCount: new Set(players.map((player) => player.gamePk)).size,
         snapshot: snapshot.state,
       });
     }
@@ -441,6 +483,137 @@ async function getGames(
     }
     throw error;
   }
+}
+
+async function getActionPlayers(
+  date: string,
+  snapshot: DailySnapshot,
+  cache: CacheStore,
+): Promise<ActionPlayer[]> {
+  const games = (await getGames(date, cache)).filter(
+    (game) => !/scheduled|preview|postponed|cancelled/i.test(game.status),
+  );
+  const snapshotByPlayer = new Map<string, Player>();
+  for (const player of snapshot.players) {
+    snapshotByPlayer.set(`${player.teamId}:${player.id}`, player);
+    snapshotByPlayer.set(`player:${player.id}`, player);
+  }
+
+  const gamePlayers = await mapLimit(games, 8, async (game) => {
+    const boxscore = await statsApi(`/game/${game.gamePk}/boxscore`);
+    const teams = objectOf(boxscore.teams);
+
+    return ([
+      { side: "away", opponent: game.home.shortName || game.home.name },
+      { side: "home", opponent: game.away.shortName || game.away.name },
+    ] as const).flatMap(({ side, opponent }) => {
+      const boxTeam = objectOf(teams[side]);
+      const team = side === "away" ? game.away : game.home;
+
+      return Object.values(objectOf(boxTeam.players))
+        .map((entry) => normalizeActionPlayer(
+          objectOf(entry),
+          team,
+          opponent,
+          game.gamePk,
+          snapshotByPlayer,
+        ))
+        .filter((player): player is ActionPlayer => Boolean(player));
+    });
+  });
+
+  return gamePlayers
+    .flat()
+    .sort((a, b) => a.name.localeCompare(b.name) || a.gamePk - b.gamePk);
+}
+
+function normalizeActionPlayer(
+  entry: Dict,
+  team: TeamSummary,
+  opponent: string,
+  gamePk: number,
+  snapshotByPlayer: Map<string, Player>,
+): ActionPlayer | null {
+  const person = objectOf(entry.person);
+  const id = numberOf(person.id);
+  const name = stringOf(person.fullName);
+  const stats = normalizeGameStats(objectOf(entry.stats));
+
+  if (!id || !name || (!stats.batting && !stats.pitching)) {
+    return null;
+  }
+
+  const snapshotPlayer =
+    snapshotByPlayer.get(`${team.id}:${id}`) ??
+    snapshotByPlayer.get(`player:${id}`);
+  const fallback: Player = {
+    id,
+    name,
+    teamId: team.id,
+    teamName: team.shortName || team.name,
+    position: stringOf(objectOf(entry.position).abbreviation),
+    number: stringOf(entry.jerseyNumber),
+    status: stringOf(objectOf(entry.status).description),
+    draft: "Not listed by MiLB",
+    school: "Not listed by MiLB",
+    schoolType: "Not listed",
+    birthCity: "Not listed",
+    birthState: "",
+    birthCountry: "Not listed",
+    milbUrl: `https://www.milb.com/player/${id}`,
+  };
+
+  return {
+    ...fallback,
+    ...snapshotPlayer,
+    teamId: team.id,
+    teamName: team.shortName || team.name,
+    position:
+      stringOf(objectOf(entry.position).abbreviation) || snapshotPlayer?.position || "",
+    number: stringOf(entry.jerseyNumber) || snapshotPlayer?.number || "",
+    gamePk,
+    opponent,
+    stats,
+  };
+}
+
+function normalizeGameStats(value: Dict): GameStats {
+  const batting = objectOf(value.batting);
+  const pitching = objectOf(value.pitching);
+  const battingPlayed = statNumber(batting.gamesPlayed) > 0;
+  const pitchingPlayed =
+    statNumber(pitching.gamesPitched) > 0 || statNumber(pitching.outs) > 0;
+
+  return {
+    batting: battingPlayed
+      ? {
+          summary: stringOf(batting.summary),
+          atBats: statNumber(batting.atBats),
+          hits: statNumber(batting.hits),
+          runs: statNumber(batting.runs),
+          rbi: statNumber(batting.rbi),
+          homeRuns: statNumber(batting.homeRuns),
+          baseOnBalls: statNumber(batting.baseOnBalls),
+          strikeOuts: statNumber(batting.strikeOuts),
+        }
+      : undefined,
+    pitching: pitchingPlayed
+      ? {
+          summary: stringOf(pitching.summary),
+          inningsPitched: stringOf(pitching.inningsPitched),
+          hits: statNumber(pitching.hits),
+          runs: statNumber(pitching.runs),
+          earnedRuns: statNumber(pitching.earnedRuns),
+          baseOnBalls: statNumber(pitching.baseOnBalls),
+          strikeOuts: statNumber(pitching.strikeOuts),
+        }
+      : undefined,
+  };
+}
+
+function statNumber(value: unknown) {
+  const result = numberOf(value);
+  return Number.isFinite(result) ? result : 0;
 }
 
 async function getRoster(

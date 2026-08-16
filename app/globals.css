@@ -1061,6 +1061,42 @@ td:first-child,
   min-width: 180px;
 }
 
+.action-table table {
+  min-width: 980px;
+}
+
+.col-stats {
+  min-width: 235px;
+}
+
+.game-stat-lines {
+  display: grid;
+  gap: 5px;
+}
+
+.game-stat-lines span {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  margin: 0;
+  color: #eaf7ff;
+  line-height: 1.3;
+}
+
+.game-stat-lines strong {
+  flex: 0 0 auto;
+  color: var(--green);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+}
+
+.game-stat-lines a {
+  width: fit-content;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
 .table-wrap td .team-logo {
   width: 20px;
   height: 20px;
@@ -1261,6 +1297,37 @@ td span {
 
   .col-school {
     width: 36%;
+  }
+
+  .action-table table {
+    min-width: 0;
+  }
+
+  .action-table .col-name {
+    width: 29%;
+  }
+
+  .action-table .col-stats {
+    width: 31%;
+    min-width: 0;
+  }
+
+  .action-table .col-draft {
+    width: 18%;
+  }
+
+  .action-table .col-school {
+    width: 22%;
+  }
+
+  .game-stat-lines span {
+    display: grid;
+    gap: 1px;
+    font-size: 0.68rem;
+  }
+
+  .game-stat-lines a {
+    font-size: 0.64rem;
   }
 
   .desktop-player-status,

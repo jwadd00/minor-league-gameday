@@ -39,6 +39,34 @@ type Player = {
   bioStatus?: "fresh" | "stale" | "missing";
 };
 
+type GameStats = {
+  batting?: {
+    summary: string;
+    atBats: number;
+    hits: number;
+    runs: number;
+    rbi: number;
+    homeRuns: number;
+    baseOnBalls: number;
+    strikeOuts: number;
+  };
+  pitching?: {
+    summary: string;
+    inningsPitched: string;
+    hits: number;
+    runs: number;
+    earnedRuns: number;
+    baseOnBalls: number;
+    strikeOuts: number;
+  };
+};
+
+type ActionPlayer = Player & {
+  gamePk: number;
+  opponent: string;
+  stats: GameStats;
+};
+
 type CacheInfo = {
   totalPlayers: number;
   freshBio: number;
@@ -61,6 +89,11 @@ type PlayerIndex = {
   players: Player[];
   teamCount: number;
   cacheInfo?: CacheInfo;
+};
+
+type ActionIndex = {
+  players: ActionPlayer[];
+  gameCount: number;
 };
 
 type ApiState<T> = {
@@ -114,7 +147,22 @@ const PLAYER_COLUMNS: Array<{ key: PlayerSortKey; label: string }> = [
   { key: "birthCity", label: "Birthplace" },
 ];
 
+const ACTION_COLUMNS: Array<{
+  key: PlayerSortKey | "stats";
+  label: string;
+}> = [
+  ...PLAYER_COLUMNS.slice(0, 3),
+  { key: "stats", label: "Stats" },
+  ...PLAYER_COLUMNS.slice(3),
+];
+
 const todayValue = () => new Date().toISOString().slice(0, 10);
+
+function previousDate(value: string) {
+  const result = new Date(`${value}T12:00:00`);
+  result.setDate(result.getDate() - 1);
+  return result.toISOString().slice(0, 10);
+}
 
 function formatGameTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -230,7 +278,10 @@ export function GamedayApp() {
   const gamesRef = useRef<HTMLDivElement | null>(null);
   const detailRef = useRef<HTMLElement | null>(null);
   const playersRef = useRef<HTMLElement | null>(null);
-  const [activeTab, setActiveTab] = useState<"games" | "players">("games");
+  const actionRef = useRef<HTMLElement | null>(null);
+  const [activeTab, setActiveTab] = useState<"games" | "players" | "action">(
+    "games",
+  );
   const [date, setDate] = useState(todayValue);
   const [games, setGames] = useState<ApiState<Game[]>>({ status: "idle" });
   const [selectedGamePk, setSelectedGamePk] = useState<number | null>(null);
@@ -240,10 +291,9 @@ export function GamedayApp() {
   const [allPlayers, setAllPlayers] = useState<ApiState<PlayerIndex>>({
     status: "idle",
   });
-  const [query, setQuery] = useState("");
-  const [school, setSchool] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
+  const [actionPlayers, setActionPlayers] = useState<ApiState<ActionIndex>>({
+    status: "idle",
+  });
   const [gameQuery, setGameQuery] = useState("");
   const [gameCategory, setGameCategory] = useState<GameCategory>("fullSeason");
 
@@ -282,6 +332,33 @@ export function GamedayApp() {
       cancelled = true;
     };
   }, [date]);
+
+  const actionDate = previousDate(date);
+
+  useEffect(() => {
+    if (activeTab !== "action") {
+      return;
+    }
+
+    let cancelled = false;
+    setActionPlayers({ status: "loading" });
+
+    getJson<ActionIndex>(`/api/milb?view=action&date=${actionDate}`)
+      .then((payload) => {
+        if (!cancelled) {
+          setActionPlayers({ status: "ready", data: payload });
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setActionPlayers({ status: "error", error: error.message });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [actionDate, activeTab]);
 
   useEffect(() => {
     if (!selectedGamePk) {
@@ -327,6 +404,11 @@ export function GamedayApp() {
   function showPlayers() {
     setActiveTab("players");
     scrollTo(playersRef);
+  }
+
+  function showAction() {
+    setActiveTab("action");
+    scrollTo(actionRef);
   }
 
   function selectGame(gamePk: number) {
@@ -382,42 +464,6 @@ export function GamedayApp() {
     );
   }, [games.data]);
 
-  const playerRows = useMemo(() => {
-    const rows = playersForPage;
-    const normalizedQuery = query.trim().toLowerCase();
-
-    return rows.filter((player) => {
-      const searchable = [
-        player.name,
-        player.teamName,
-        player.position,
-        player.draft,
-        player.school,
-        player.birthCity,
-        player.birthState,
-        player.birthCountry,
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return (
-        (!normalizedQuery || searchable.includes(normalizedQuery)) &&
-        (!school || player.school === school) &&
-        (!city || player.birthCity === city) &&
-        (!state || player.birthState === state)
-      );
-    });
-  }, [city, playersForPage, query, school, state]);
-
-  const filterOptions = useMemo(() => {
-    const rows = playersForPage;
-    return {
-      schools: uniqueSorted(rows.map((player) => player.school)),
-      cities: uniqueSorted(rows.map((player) => player.birthCity)),
-      states: uniqueSorted(rows.map((player) => player.birthState)),
-    };
-  }, [playersForPage]);
-
   return (
     <main className="min-h-screen bg-[#07111c] text-[#eaf7ff]">
       <section className="topbar">
@@ -437,10 +483,23 @@ export function GamedayApp() {
           >
             Players
           </button>
+          <button
+            type="button"
+            className={activeTab === "action" ? "active" : ""}
+            onClick={showAction}
+          >
+            Yesterday&apos;s Action
+          </button>
         </nav>
         <div>
           <p className="eyebrow">Live minor league roster finder</p>
-          <h1>Today&apos;s Games</h1>
+          <h1>
+            {activeTab === "action"
+              ? "Yesterday's Action"
+              : activeTab === "players"
+                ? "Players"
+                : "Today's Games"}
+          </h1>
           <p className="lede">
             Pick a matchup and pull the roster details fans ask for: number,
             position, draft slot, school, birthplace, and current MiLB card.
@@ -623,84 +682,24 @@ export function GamedayApp() {
               ) : null}
             </section>
           </div>
-        ) : (
+        ) : activeTab === "players" ? (
           <section className="players-panel" ref={playersRef}>
-            <div className="panel-heading wide">
-              <div>
-                <p className="eyebrow">Player finder</p>
-                <h2>Players Taking The Field {labelForDate(date)}</h2>
-              </div>
-              <span>
-                {playerRows.length}/{playersForPage.length} shown
-              </span>
-            </div>
-
-            <div className="filters">
-              <label className="search">
-                <span>Search</span>
-                <input
-                  value={query}
-                  placeholder="Name, team, draft, school..."
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </label>
-              <label>
-                <span>College or high school</span>
-                <select
-                  value={school}
-                  onChange={(event) => setSchool(event.target.value)}
-                >
-                  <option value="">All schools</option>
-                  {filterOptions.schools.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Birth city</span>
-                <select value={city} onChange={(event) => setCity(event.target.value)}>
-                  <option value="">All cities</option>
-                  {filterOptions.cities.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Birth state</span>
-                <select
-                  value={state}
-                  onChange={(event) => setState(event.target.value)}
-                >
-                  <option value="">All states</option>
-                  {filterOptions.states.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            {allPlayers.status === "loading" ? (
-              <div className="inline-status player-status" role="status" aria-live="polite">
-                Loading the day-wide player table
-              </div>
-            ) : null}
-
-            {allPlayers.status === "error" ? (
-              <EmptyState
-                title="Player index unavailable"
-                text={allPlayers.error ?? ""}
-              />
-            ) : null}
-
-            {playerRows.length > 0 ? (
-              <PlayerTableEnhanced players={playerRows} />
-            ) : null}
+            <PlayerFinder
+              eyebrow="Player finder"
+              title={`Players Taking The Field ${labelForDate(date)}`}
+              players={playersForPage}
+              state={allPlayers}
+            />
+          </section>
+        ) : (
+          <section className="players-panel" ref={actionRef}>
+            <PlayerFinder
+              eyebrow="Completed box scores"
+              title={`Yesterday’s Action — ${labelForDate(actionDate)}`}
+              players={actionPlayers.data?.players ?? []}
+              state={actionPlayers}
+              showStats
+            />
           </section>
         )}
       </section>
@@ -829,7 +828,178 @@ function PlayerTable({ players }: { players: Player[] }) {
   );
 }
 
-function PlayerTableEnhanced({ players }: { players: Player[] }) {
+function PlayerFinder({
+  eyebrow,
+  title,
+  players,
+  state,
+  showStats = false,
+}: {
+  eyebrow: string;
+  title: string;
+  players: Player[];
+  state: ApiState<unknown>;
+  showStats?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [school, setSchool] = useState("");
+  const [city, setCity] = useState("");
+  const [birthState, setBirthState] = useState("");
+
+  const filterOptions = useMemo(
+    () => ({
+      schools: uniqueSorted(players.map((player) => player.school)),
+      cities: uniqueSorted(players.map((player) => player.birthCity)),
+      states: uniqueSorted(players.map((player) => player.birthState)),
+    }),
+    [players],
+  );
+
+  const rows = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return players.filter((player) => {
+      const action = isActionPlayer(player) ? player : null;
+      const searchable = [
+        player.name,
+        player.teamName,
+        player.position,
+        player.draft,
+        player.school,
+        player.birthCity,
+        player.birthState,
+        player.birthCountry,
+        action?.opponent,
+        action?.stats.batting?.summary,
+        action?.stats.pitching?.summary,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return (
+        (!normalizedQuery || searchable.includes(normalizedQuery)) &&
+        (!school || player.school === school) &&
+        (!city || player.birthCity === city) &&
+        (!birthState || player.birthState === birthState)
+      );
+    });
+  }, [birthState, city, players, query, school]);
+
+  return (
+    <>
+      <div className="panel-heading wide">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2>{title}</h2>
+        </div>
+        <span>
+          {rows.length}/{players.length} shown
+        </span>
+      </div>
+
+      <div className="filters">
+        <label className="search">
+          <span>Search</span>
+          <input
+            value={query}
+            placeholder={
+              showStats
+                ? "Name, team, opponent, stats..."
+                : "Name, team, draft, school..."
+            }
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>College or high school</span>
+          <select value={school} onChange={(event) => setSchool(event.target.value)}>
+            <option value="">All schools</option>
+            {filterOptions.schools.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Birth city</span>
+          <select value={city} onChange={(event) => setCity(event.target.value)}>
+            <option value="">All cities</option>
+            {filterOptions.cities.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Birth state</span>
+          <select
+            value={birthState}
+            onChange={(event) => setBirthState(event.target.value)}
+          >
+            <option value="">All states</option>
+            {filterOptions.states.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {state.status === "loading" ? (
+        <div className="inline-status player-status" role="status" aria-live="polite">
+          {showStats
+            ? "Loading yesterday’s box scores"
+            : "Loading the day-wide player table"}
+        </div>
+      ) : null}
+
+      {state.status === "error" ? (
+        <EmptyState
+          title={showStats ? "Yesterday’s action unavailable" : "Player index unavailable"}
+          text={state.error ?? ""}
+        />
+      ) : null}
+
+      {state.status === "ready" && players.length === 0 ? (
+        <EmptyState
+          title={showStats ? "No player action found" : "No players found"}
+          text={
+            showStats
+              ? "There were no completed player box scores for this date."
+              : "Try another date or check back after the daily snapshot is ready."
+          }
+        />
+      ) : null}
+
+      {state.status === "ready" && players.length > 0 && rows.length === 0 ? (
+        <EmptyState
+          title="No players match"
+          text="Clear a filter or try a broader search term."
+        />
+      ) : null}
+
+      {rows.length > 0 ? (
+        <PlayerTableEnhanced players={rows} showStats={showStats} />
+      ) : null}
+    </>
+  );
+}
+
+function isActionPlayer(player: Player): player is ActionPlayer {
+  return "stats" in player && "gamePk" in player;
+}
+
+function PlayerTableEnhanced({
+  players,
+  showStats = false,
+}: {
+  players: Player[];
+  showStats?: boolean;
+}) {
   const [tableQuery, setTableQuery] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [positionFilter, setPositionFilter] = useState("");
@@ -863,6 +1033,9 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
           player.birthCity,
           player.birthState,
           player.birthCountry,
+          isActionPlayer(player) ? player.opponent : "",
+          isActionPlayer(player) ? player.stats.batting?.summary : "",
+          isActionPlayer(player) ? player.stats.pitching?.summary : "",
         ]
           .join(" ")
           .toLowerCase();
@@ -975,33 +1148,41 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
           text="Clear a table filter or try a broader search term."
         />
       ) : (
-        <div className="table-wrap">
+        <div className={showStats ? "table-wrap action-table" : "table-wrap"}>
           <table>
             <thead>
               <tr>
-                {PLAYER_COLUMNS.map((column) => (
+                {(showStats ? ACTION_COLUMNS : PLAYER_COLUMNS).map((column) => (
                   <th key={column.key} className={`col-${column.key}`}>
-                    <button
-                      type="button"
-                      className="sort-button"
-                      onClick={() => toggleSort(column.key)}
-                    >
-                      {column.label}
-                      <span aria-hidden="true">
-                        {sort.key === column.key
-                          ? sort.direction === "asc"
-                            ? " ↑"
-                            : " ↓"
-                          : ""}
-                      </span>
-                    </button>
+                    {column.key === "stats" ? (
+                      column.label
+                    ) : (
+                      <button
+                        type="button"
+                        className="sort-button"
+                        onClick={() => toggleSort(column.key as PlayerSortKey)}
+                      >
+                        {column.label}
+                        <span aria-hidden="true">
+                          {sort.key === column.key
+                            ? sort.direction === "asc"
+                              ? " ↑"
+                              : " ↓"
+                            : ""}
+                        </span>
+                      </button>
+                    )}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.map((player) => (
-                <tr key={`${player.teamId}-${player.id}`}>
+                <tr
+                  key={`${player.teamId}-${player.id}-${
+                    isActionPlayer(player) ? player.gamePk : "roster"
+                  }`}
+                >
                   <td className="col-name">
                     <a href={player.milbUrl} target="_blank" rel="noreferrer">
                       {player.name}
@@ -1019,6 +1200,11 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
                     {player.position || "-"}
                     {player.number ? <span>#{player.number}</span> : null}
                   </td>
+                  {showStats && isActionPlayer(player) ? (
+                    <td className="col-stats">
+                      <GameStatLines player={player} />
+                    </td>
+                  ) : null}
                   <td className="col-draft">
                     <span className="desktop-cell-value">{player.draft || "-"}</span>
                     <span className="mobile-cell-value" title={player.draft}>
@@ -1039,6 +1225,34 @@ function PlayerTableEnhanced({ players }: { players: Player[] }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function GameStatLines({ player }: { player: ActionPlayer }) {
+  return (
+    <div className="game-stat-lines">
+      {player.stats.batting ? (
+        <span>
+          <strong>BAT</strong>
+          {player.stats.batting.summary ||
+            `${player.stats.batting.hits}-${player.stats.batting.atBats}, ${player.stats.batting.runs} R, ${player.stats.batting.rbi} RBI`}
+        </span>
+      ) : null}
+      {player.stats.pitching ? (
+        <span>
+          <strong>PITCH</strong>
+          {player.stats.pitching.summary ||
+            `${player.stats.pitching.inningsPitched} IP, ${player.stats.pitching.earnedRuns} ER, ${player.stats.pitching.strikeOuts} K`}
+        </span>
+      ) : null}
+      <a
+        href={`https://www.milb.com/gameday/${player.gamePk}`}
+        target="_blank"
+        rel="noreferrer"
+      >
+        vs. {player.opponent}
+      </a>
     </div>
   );
 }

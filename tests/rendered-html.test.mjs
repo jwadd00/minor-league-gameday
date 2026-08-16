@@ -38,6 +38,7 @@ test("server-renders the Gameday Scout shell", async () => {
   assert.match(html, /Team search/i);
   assert.match(html, /Full-season/);
   assert.match(html, /Players/);
+  assert.match(html, /Yesterday&#x27;s Action/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Building your site/i);
 });
 
@@ -140,4 +141,25 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.match(scheduler, /OAI-Sites-Authorization/);
   assert.match(scheduler, /x-gameday-cache-token/);
   assert.match(schedulerConfig, /"crons":\s*\["0 10,14,18,22 \* \* \*"\]/);
+});
+
+test("loads prior-day player action with box-score stats and shared filters", async () => {
+  const [client, route, css] = await Promise.all([
+    readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(client, /function previousDate\(value: string\)/);
+  assert.match(client, /view=action&date=\$\{actionDate\}/);
+  assert.match(client, /Yesterday&?apos;?s Action|Yesterday's Action/);
+  assert.match(client, /\{ key: "stats", label: "Stats" \}/);
+  assert.match(client, /<PlayerFinder[\s\S]*?showStats/);
+  assert.match(client, /<strong>BAT<\/strong>/);
+  assert.match(client, /<strong>PITCH<\/strong>/);
+  assert.match(route, /if \(view === "action"\)/);
+  assert.match(route, /`\/game\/\$\{game\.gamePk\}\/boxscore`/);
+  assert.match(route, /normalizeGameStats/);
+  assert.match(css, /\.col-stats/);
+  assert.match(css, /\.game-stat-lines/);
 });
