@@ -832,6 +832,115 @@ select:focus {
   text-transform: uppercase;
 }
 
+.col-gameStats {
+  min-width: 190px;
+  color: #d7f1f8;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+@media (min-width: 1180px) {
+  .games-grid {
+    grid-template-columns: minmax(400px, 0.75fr) minmax(0, 1.25fr);
+    align-items: start;
+    gap: 16px;
+  }
+
+  .games-panel,
+  .detail-panel {
+    height: min(730px, calc(100vh - 32px));
+    max-height: min(730px, calc(100vh - 32px));
+  }
+
+  .games-panel {
+    overflow: hidden;
+  }
+
+  .games-grid .game-tools {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .games-grid .category-row {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding-bottom: 3px;
+    scrollbar-color: var(--blue) transparent;
+    scrollbar-width: thin;
+  }
+
+  .games-grid .category-row button {
+    min-width: 78px;
+    flex: 0 0 78px;
+  }
+
+  .detail-panel {
+    position: sticky;
+    top: 16px;
+    overflow-y: auto;
+    scrollbar-color: var(--blue) rgba(255, 255, 255, 0.08);
+    scrollbar-width: thin;
+  }
+
+  .games-grid .game-list-head {
+    display: none;
+  }
+
+  .games-grid .game {
+    grid-template-columns: 58px minmax(0, 1fr) 24px minmax(0, 1fr);
+    min-height: 74px;
+    overflow: hidden;
+  }
+
+  .games-grid .game .level {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .games-grid .game-away {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .games-grid .game-matchup {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .games-grid .game-home {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  .games-grid .game > span.game-schedule {
+    grid-column: 2 / span 2;
+    grid-row: 2;
+    border-left: 1px solid rgba(143, 161, 173, 0.13);
+  }
+
+  .games-grid .game > span.game-status {
+    grid-column: 1;
+    grid-row: 2;
+    border-left: 0;
+    justify-content: center;
+    padding-inline: 4px;
+    text-align: center;
+  }
+
+  .games-grid .game > span.game-action {
+    display: none;
+  }
+
+  .games-grid .game-away,
+  .games-grid .game-home,
+  .games-grid .game-schedule,
+  .games-grid .game-status {
+    min-width: 0;
+    overflow: hidden;
+  }
+}
+
 .detail-head a,
 table a {
   color: var(--green);
@@ -1116,6 +1225,7 @@ td span {
 
 .mobile-player-team,
 .mobile-player-meta,
+.mobile-game-stats,
 .mobile-cell-value {
   display: none;
 }
@@ -1283,6 +1393,7 @@ td span {
   .col-position,
   .col-number,
   .col-birthCity,
+  .col-gameStats,
   .col-state {
     display: none;
   }
@@ -1337,6 +1448,7 @@ td span {
 
   .mobile-player-team,
   .mobile-player-meta,
+  .mobile-game-stats,
   .mobile-cell-value {
     display: block;
   }
@@ -1347,6 +1459,7 @@ td span {
   }
 
   .mobile-player-meta,
+  .mobile-game-stats,
   .mobile-cell-value,
   td span {
     margin-top: 2px;
@@ -1356,5 +1469,10 @@ td span {
 
   .mobile-cell-value {
     color: #e4f2fb;
+  }
+
+  .mobile-game-stats {
+    color: var(--green);
+    font-weight: 700;
   }
 }

@@ -13,6 +13,8 @@ const SCHEDULE_TTL_MS = 3 * 60 * 1000;
 const ROSTER_TTL_MS = 15 * 60 * 1000;
 const PLAYER_META_TTL_MS = 21 * 24 * 60 * 60 * 1000;
 const FAILED_CARD_TTL_MS = 60 * 60 * 1000;
+const SNAPSHOT_RETENTION_DAYS = 400;
+const BACKFILL_MAX_ATTEMPTS = 4;
 
 type Dict = Record<string, unknown>;
 
@@ -33,6 +35,40 @@ type Game = {
   level: string;
   away: TeamSummary;
   home: TeamSummary;
+};
+
+type BoxScoreLine = {
+  playerId: number;
+  name: string;
+  position: string;
+  batting?: {
+    atBats: number;
+    runs: number;
+    hits: number;
+    rbi: number;
+    walks: number;
+    strikeOuts: number;
+    homeRuns: number;
+  };
+  pitching?: {
+    inningsPitched: string;
+    hits: number;
+    runs: number;
+    earnedRuns: number;
+    walks: number;
+    strikeOuts: number;
+    pitches: number;
+  };
+};
+
+type BoxScore = {
+  gamePk: number;
+  fetchedAt: number;
+  teams: Array<{
+    team: TeamSummary;
+    batting: BoxScoreLine[];
+    pitching: BoxScoreLine[];
+  }>;
 };
 
 type BioStatus = "fresh" | "stale" | "missing";
@@ -136,6 +172,7 @@ const cardCache = new Map<number, Promise<FetchedPlayerCard>>();
 const memorySchedule = new Map<string, CacheEntry<Game[]>>();
 const memoryRosters = new Map<string, CacheEntry<Player[]>>();
 const memoryPlayers = new Map<number, PlayerMetaRow>();
+const memoryBoxScores = new Map<number, BoxScore>();
 let schemaReady: Promise<void> | null = null;
 
 export async function GET(request: Request) {
@@ -159,6 +196,23 @@ export async function GET(request: Request) {
       return detail
         ? snapshotJson(detail)
         : snapshotUnavailable(date);
+    }
+
+    if (view === "boxscore") {
+      const gamePk = Number(url.searchParams.get("gamePk"));
+      if (!Number.isFinite(gamePk)) {
+        return Response.json({ error: "gamePk is required." }, { status: 400 });
+      }
+
+      const game = (await getGames(date, cache)).find((entry) => entry.gamePk === gamePk);
+      if (!game) {
+        return Response.json({ error: "Game was not found for that date." }, { status: 404 });
+      }
+      if (game.status !== "Final") {
+        return Response.json({ error: "Box scores are available after a game is final." }, { status: 409 });
+      }
+
+      return snapshotJson(await getGameBoxScore(game, cache));
     }
 
     if (view === "players") {
@@ -195,7 +249,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const url = new URL(request.url);
-    if (url.searchParams.get("view") !== "materialize") {
+    const view = url.searchParams.get("view");
+    if (view !== "materialize" && view !== "backfill") {
       return Response.json({ error: "Unknown view." }, { status: 400 });
     }
 
@@ -206,9 +261,16 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    return Response.json(
-      await materializeDailySnapshot(normalizeDate(url.searchParams.get("date"))),
-    );
+    if (view === "backfill") {
+      return Response.json(
+        await processNextBackfillDate(
+          normalizeDate(url.searchParams.get("start") ?? "2026-08-01"),
+          normalizeDate(url.searchParams.get("end") ?? "2026-08-31"),
+        ),
+      );
+    }
+
+    return Response.json(await materializeDailySnapshot(normalizeDate(url.searchParams.get("date"))));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error.";
     return Response.json({ error: message }, { status: 500 });
@@ -222,6 +284,11 @@ export async function materializeDailySnapshot(date: string) {
   }
 
   const games = await getGames(date, cache, true);
+  await Promise.allSettled(
+    games
+      .filter((game) => game.status === "Final")
+      .map((game) => getGameBoxScore(game, cache)),
+  );
   const teams = uniqueTeams(games);
   const generation = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
   const builtAt = Date.now();
@@ -229,18 +296,27 @@ export async function materializeDailySnapshot(date: string) {
     team,
     players: await getBaseRoster(team, date, cache, true),
   }));
-  const teamSnapshots = baseSnapshots.map((entry) => ({
-    team: entry.team,
-    players: entry.players.map((player) =>
-      withExplicitMissingValues({ ...player, bioStatus: "fresh" }),
-    ),
-  }));
+  const uniquePlayers = Array.from(
+    new Map(
+      baseSnapshots
+        .flatMap((entry) => entry.players)
+        .map((player) => [player.id, player]),
+    ).values(),
+  );
+  await enrichPlayers(uniquePlayers, cache);
+  const teamSnapshots = await mapLimit(baseSnapshots, 8, async (entry) => {
+    const merged = await mergeCachedBio(entry.players, cache);
+    return {
+      team: entry.team,
+      players: merged.players.map(withExplicitMissingValues),
+    };
+  });
 
   const players = teamSnapshots.flatMap((entry) => entry.players);
   const unresolvedPlayers = players.filter(
     (player) => player.bioStatus !== "fresh",
   );
-  if (teams.length === 0 || players.length === 0) {
+  if (games.length > 0 && players.length === 0) {
     throw new Error("Snapshot validation failed because the schedule or rosters were empty.");
   }
   if (unresolvedPlayers.length > 0) {
@@ -284,10 +360,10 @@ export async function materializeDailySnapshot(date: string) {
       "DELETE FROM daily_team_snapshot WHERE date = ? AND generation <> ?",
     ).bind(date, generation),
     cache.db.prepare(
-      "DELETE FROM daily_team_snapshot WHERE date < date(?, '-3 days')",
+      `DELETE FROM daily_team_snapshot WHERE date < date(?, '-${SNAPSHOT_RETENTION_DAYS} days')`,
     ).bind(date),
     cache.db.prepare(
-      "DELETE FROM daily_snapshot_state WHERE date < date(?, '-3 days')",
+      `DELETE FROM daily_snapshot_state WHERE date < date(?, '-${SNAPSHOT_RETENTION_DAYS} days')`,
     ).bind(date),
   ]);
 
@@ -300,6 +376,83 @@ export async function materializeDailySnapshot(date: string) {
     missingSchool,
     builtAt,
   };
+}
+
+async function processNextBackfillDate(start: string, end: string) {
+  const cache = await getCacheStore();
+  if (!cache.db) {
+    throw new Error("Backfill requires the configured database.");
+  }
+
+  const cappedEnd = end < easternDate() ? end : easternDate();
+  if (start > cappedEnd) {
+    return { status: "waiting", message: "No completed dates are in the requested range." };
+  }
+
+  await seedBackfillDates(start, cappedEnd, cache.db);
+  const next = await cache.db
+    .prepare(
+      "SELECT date, attempts FROM backfill_day_state WHERE date >= ? AND date <= ? AND status = 'pending' ORDER BY date LIMIT 1",
+    )
+    .bind(start, cappedEnd)
+    .first<{ date: string; attempts: number }>();
+
+  if (!next) {
+    const remaining = await cache.db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM backfill_day_state WHERE date >= ? AND date <= ? AND status != 'complete'",
+      )
+      .bind(start, cappedEnd)
+      .first<{ count: number }>();
+    return { status: remaining?.count ? "blocked" : "complete", remaining: remaining?.count ?? 0 };
+  }
+
+  const now = Date.now();
+  const claim = await cache.db
+    .prepare(
+      "UPDATE backfill_day_state SET status = 'processing', attempts = attempts + 1, started_at = ?, updated_at = ? WHERE date = ? AND status = 'pending'",
+    )
+    .bind(now, now, next.date)
+    .run();
+
+  if (claim.meta.changes !== 1) {
+    return { status: "claimed_elsewhere", date: next.date };
+  }
+
+  try {
+    const snapshot = await materializeDailySnapshot(next.date);
+    const completedAt = Date.now();
+    await cache.db
+      .prepare(
+        "UPDATE backfill_day_state SET status = 'complete', completed_at = ?, last_error = '', updated_at = ? WHERE date = ?",
+      )
+      .bind(completedAt, completedAt, next.date)
+      .run();
+    return { status: "complete", date: next.date, snapshot };
+  } catch (error) {
+    const message = error instanceof Error ? error.message.slice(0, 500) : "Unexpected error.";
+    const failedAt = Date.now();
+    await cache.db
+      .prepare(
+        "UPDATE backfill_day_state SET status = CASE WHEN attempts >= ? THEN 'failed' ELSE 'pending' END, last_error = ?, updated_at = ? WHERE date = ?",
+      )
+      .bind(BACKFILL_MAX_ATTEMPTS, message, failedAt, next.date)
+      .run();
+    return { status: "retrying", date: next.date, error: message };
+  }
+}
+
+async function seedBackfillDates(start: string, end: string, db: D1Database) {
+  const statements = dateRange(start, end).map((date) =>
+    db
+      .prepare(
+        "INSERT INTO backfill_day_state (date, status, attempts, last_error, started_at, completed_at, updated_at) VALUES (?, 'pending', 0, '', 0, 0, ?) ON CONFLICT(date) DO NOTHING",
+      )
+      .bind(date, Date.now()),
+  );
+  for (const batch of chunkArray(statements, 50)) {
+    await db.batch(batch);
+  }
 }
 
 async function readDailySnapshot(
@@ -886,10 +1039,17 @@ async function ensureSchema(db: D1Database) {
     db.prepare(
       "CREATE TABLE IF NOT EXISTS daily_team_snapshot (date TEXT NOT NULL, generation TEXT NOT NULL, team_id INTEGER NOT NULL, team_name TEXT NOT NULL, payload TEXT NOT NULL, fetched_at INTEGER NOT NULL, PRIMARY KEY (date, generation, team_id))",
     ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS game_box_score_cache (game_pk INTEGER PRIMARY KEY, payload TEXT NOT NULL, fetched_at INTEGER NOT NULL)",
+    ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS backfill_day_state (date TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL DEFAULT 0, completed_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)",
+    ),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_schedule_cache_expires_at ON schedule_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_roster_cache_expires_at ON roster_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_player_meta_cache_expires_at ON player_meta_cache (expires_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_daily_team_snapshot_lookup ON daily_team_snapshot (date, generation, team_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_backfill_day_state_status_date ON backfill_day_state (status, date)"),
     db.prepare("PRAGMA optimize"),
   ]);
 }
@@ -927,6 +1087,53 @@ async function writeScheduleCache(date: string, games: Game[], cache: CacheStore
       "INSERT INTO schedule_cache (date, payload, fetched_at, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT(date) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
     )
     .bind(date, JSON.stringify(games), entry.fetchedAt, entry.expiresAt)
+    .run();
+}
+
+async function getGameBoxScore(game: Game, cache: CacheStore): Promise<BoxScore> {
+  const cached = await readGameBoxScore(game.gamePk, cache);
+  if (cached) {
+    return cached;
+  }
+
+  const payload = await statsApi(`/game/${game.gamePk}/boxscore`);
+  const boxScore: BoxScore = {
+    gamePk: game.gamePk,
+    fetchedAt: Date.now(),
+    teams: [
+      normalizeBoxScoreTeam(objectOf(objectOf(payload.teams).away), game.away),
+      normalizeBoxScoreTeam(objectOf(objectOf(payload.teams).home), game.home),
+    ],
+  };
+
+  await writeGameBoxScore(boxScore, cache);
+  return boxScore;
+}
+
+async function readGameBoxScore(gamePk: number, cache: CacheStore) {
+  if (!cache.db) {
+    return memoryBoxScores.get(gamePk);
+  }
+
+  const row = await cache.db
+    .prepare("SELECT payload FROM game_box_score_cache WHERE game_pk = ?")
+    .bind(gamePk)
+    .first<{ payload: string }>();
+
+  return row ? (JSON.parse(row.payload) as BoxScore) : undefined;
+}
+
+async function writeGameBoxScore(boxScore: BoxScore, cache: CacheStore) {
+  if (!cache.db) {
+    memoryBoxScores.set(boxScore.gamePk, boxScore);
+    return;
+  }
+
+  await cache.db
+    .prepare(
+      "INSERT INTO game_box_score_cache (game_pk, payload, fetched_at) VALUES (?, ?, ?) ON CONFLICT(game_pk) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at",
+    )
+    .bind(boxScore.gamePk, JSON.stringify(boxScore), boxScore.fetchedAt)
     .run();
 }
 
@@ -1112,6 +1319,61 @@ function normalizeTeam(side: Dict): TeamSummary | null {
     name,
     shortName: stringOf(team.shortName) || name,
     abbreviation: stringOf(team.abbreviation) || "",
+  };
+}
+
+function normalizeBoxScoreTeam(side: Dict, team: TeamSummary) {
+  const players = Object.values(objectOf(side.players)).map(objectOf);
+  const batting = players
+    .map(normalizeBoxScoreLine)
+    .filter((line): line is BoxScoreLine => Boolean(line?.batting));
+  const pitching = players
+    .map(normalizeBoxScoreLine)
+    .filter((line): line is BoxScoreLine => Boolean(line?.pitching));
+
+  return { team, batting, pitching };
+}
+
+function normalizeBoxScoreLine(value: Dict): BoxScoreLine | null {
+  const person = objectOf(value.person);
+  const playerId = numberOf(person.id);
+  const name = stringOf(person.fullName);
+  if (!playerId || !name) {
+    return null;
+  }
+
+  const stats = objectOf(value.stats);
+  const battingStats = objectOf(stats.batting);
+  const pitchingStats = objectOf(stats.pitching);
+  const batting = numberOf(battingStats.gamesPlayed) || stringOf(battingStats.summary)
+    ? {
+        atBats: numberOf(battingStats.atBats) ?? 0,
+        runs: numberOf(battingStats.runs) ?? 0,
+        hits: numberOf(battingStats.hits) ?? 0,
+        rbi: numberOf(battingStats.rbi) ?? 0,
+        walks: numberOf(battingStats.baseOnBalls) ?? 0,
+        strikeOuts: numberOf(battingStats.strikeOuts) ?? 0,
+        homeRuns: numberOf(battingStats.homeRuns) ?? 0,
+      }
+    : undefined;
+  const pitching = numberOf(pitchingStats.gamesPitched) || stringOf(pitchingStats.inningsPitched)
+    ? {
+        inningsPitched: stringOf(pitchingStats.inningsPitched) || "0.0",
+        hits: numberOf(pitchingStats.hits) ?? 0,
+        runs: numberOf(pitchingStats.runs) ?? 0,
+        earnedRuns: numberOf(pitchingStats.earnedRuns) ?? 0,
+        walks: numberOf(pitchingStats.baseOnBalls) ?? 0,
+        strikeOuts: numberOf(pitchingStats.strikeOuts) ?? 0,
+        pitches: numberOf(pitchingStats.pitchesThrown) ?? 0,
+      }
+    : undefined;
+
+  return {
+    playerId,
+    name,
+    position: stringOf(objectOf(value.position).abbreviation),
+    batting,
+    pitching,
   };
 }
 
@@ -1540,6 +1802,26 @@ function normalizeDate(value: string | null) {
     return value;
   }
   return new Date().toISOString().slice(0, 10);
+}
+
+function easternDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function dateRange(start: string, end: string) {
+  const dates: string[] = [];
+  const cursor = new Date(`${start}T12:00:00Z`);
+  const last = new Date(`${end}T12:00:00Z`);
+  while (cursor <= last) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
 }
 
 function chunkArray<T>(items: T[], size: number) {

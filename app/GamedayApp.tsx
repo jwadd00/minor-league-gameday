@@ -85,6 +85,40 @@ type GameDetail = {
   cacheInfo?: CacheInfo;
 };
 
+type BoxScoreLine = {
+  playerId: number;
+  name: string;
+  position: string;
+  batting?: {
+    atBats: number;
+    runs: number;
+    hits: number;
+    rbi: number;
+    walks: number;
+    strikeOuts: number;
+    homeRuns: number;
+  };
+  pitching?: {
+    inningsPitched: string;
+    hits: number;
+    runs: number;
+    earnedRuns: number;
+    walks: number;
+    strikeOuts: number;
+    pitches: number;
+  };
+};
+
+type BoxScore = {
+  gamePk: number;
+  fetchedAt: number;
+  teams: Array<{
+    team: TeamSummary;
+    batting: BoxScoreLine[];
+    pitching: BoxScoreLine[];
+  }>;
+};
+
 type PlayerIndex = {
   players: Player[];
   teamCount: number;
@@ -293,6 +327,7 @@ export function GamedayApp() {
   const [gameDetail, setGameDetail] = useState<ApiState<GameDetail>>({
     status: "idle",
   });
+  const [boxScore, setBoxScore] = useState<ApiState<BoxScore>>({ status: "idle" });
   const [allPlayers, setAllPlayers] = useState<ApiState<PlayerIndex>>({
     status: "idle",
   });
@@ -307,6 +342,7 @@ export function GamedayApp() {
     setGames({ status: "loading" });
     setSelectedGamePk(null);
     setGameDetail({ status: "idle" });
+    setBoxScore({ status: "idle" });
     setAllPlayers({ status: "loading" });
 
     getJson<{ games: Game[] }>(`/api/milb?view=games&date=${date}`)
@@ -391,6 +427,32 @@ export function GamedayApp() {
   const selectedGame =
     games.data?.find((game) => game.gamePk === selectedGamePk) ?? null;
 
+  useEffect(() => {
+    if (!selectedGame || selectedGame.status !== "Final") {
+      setBoxScore({ status: "idle" });
+      return;
+    }
+
+    let cancelled = false;
+    setBoxScore({ status: "loading" });
+
+    getJson<BoxScore>(`/api/milb?view=boxscore&date=${date}&gamePk=${selectedGame.gamePk}`)
+      .then((payload) => {
+        if (!cancelled) {
+          setBoxScore({ status: "ready", data: payload });
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setBoxScore({ status: "error", error: error.message });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [date, selectedGame]);
+
   const playersForPage = allPlayers.data?.players ?? [];
 
   function scrollTo(ref: { current: Element | null }) {
@@ -435,7 +497,9 @@ export function GamedayApp() {
   function selectGame(gamePk: number) {
     setActiveTab("games");
     setSelectedGamePk(gamePk);
-    scrollTo(detailRef);
+    if (window.matchMedia("(max-width: 1179px)").matches) {
+      scrollTo(detailRef);
+    }
   }
 
   const filteredGames = useMemo(() => {
@@ -690,7 +754,7 @@ export function GamedayApp() {
               ) : null}
 
               {gameDetail.status === "ready" && gameDetail.data ? (
-                <RosterTables detail={gameDetail.data} />
+                <RosterTables detail={gameDetail.data} boxScore={boxScore} />
               ) : null}
             </section>
           </div>
@@ -771,8 +835,16 @@ function EmptyState({ title, text }: { title: string; text: string }) {
   );
 }
 
-function RosterTables({ detail }: { detail: GameDetail }) {
+function RosterTables({
+  detail,
+  boxScore,
+}: {
+  detail: GameDetail;
+  boxScore: ApiState<BoxScore>;
+}) {
   const players = detail.teams.flatMap((entry) => entry.players);
+  const showGameStats = detail.game.status === "Final";
+  const gameStats = boxScore.data ? gameStatsByPlayer(boxScore.data) : new Map<number, string>();
 
   return (
     <div className="roster-stack">
@@ -783,9 +855,58 @@ function RosterTables({ detail }: { detail: GameDetail }) {
           </span>
         ))}
       </div>
-      <PlayerTableEnhanced players={players} />
+      <PlayerTableEnhanced
+        players={players}
+        gameStats={showGameStats ? gameStats : undefined}
+        gameStatsStatus={showGameStats ? boxScore.status : undefined}
+      />
     </div>
   );
+}
+
+function gameStatsByPlayer(boxScore: BoxScore) {
+  const stats = new Map<number, string>();
+
+  for (const team of boxScore.teams) {
+    for (const player of team.batting) {
+      const line = player.batting;
+      if (!line) {
+        continue;
+      }
+      const values = [
+        line.hits > 0 ? `${line.hits}-${line.atBats}` : "",
+        line.runs > 0 ? `${line.runs} R` : "",
+        line.rbi > 0 ? `${line.rbi} RBI` : "",
+        line.homeRuns > 0 ? `${line.homeRuns} HR` : "",
+        line.walks > 0 ? `${line.walks} BB` : "",
+        line.strikeOuts > 0 ? `${line.strikeOuts} SO` : "",
+      ].filter(Boolean);
+      if (values.length > 0) {
+        stats.set(player.playerId, values.join(", "));
+      }
+    }
+
+    for (const player of team.pitching) {
+      const line = player.pitching;
+      if (!line) {
+        continue;
+      }
+      const values = [
+        line.inningsPitched !== "0.0" ? `${line.inningsPitched} IP` : "",
+        line.hits > 0 ? `${line.hits} H` : "",
+        line.runs > 0 ? `${line.runs} R` : "",
+        line.earnedRuns > 0 ? `${line.earnedRuns} ER` : "",
+        line.walks > 0 ? `${line.walks} BB` : "",
+        line.strikeOuts > 0 ? `${line.strikeOuts} SO` : "",
+        line.pitches > 0 ? `${line.pitches} P` : "",
+      ].filter(Boolean);
+      if (values.length > 0) {
+        stats.set(player.playerId, [stats.get(player.playerId), ...values].filter(Boolean).join(", "));
+      }
+    }
+  }
+
+  return stats;
 }
 
 function PlayerTable({ players }: { players: Player[] }) {
@@ -1008,9 +1129,13 @@ function isActionPlayer(player: Player): player is ActionPlayer {
 function PlayerTableEnhanced({
   players,
   showStats = false,
+  gameStats,
+  gameStatsStatus,
 }: {
   players: Player[];
   showStats?: boolean;
+  gameStats?: Map<number, string>;
+  gameStatsStatus?: ApiState<BoxScore>["status"];
 }) {
   const [tableQuery, setTableQuery] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
@@ -1186,6 +1311,7 @@ function PlayerTableEnhanced({
                     )}
                   </th>
                 ))}
+                {gameStats ? <th className="col-gameStats">Game stats</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -1204,6 +1330,12 @@ function PlayerTableEnhanced({
                     <span className="mobile-player-meta">
                       {compactPlayerMeta(player)}
                     </span>
+                    {gameStats ? (
+                      <span className="mobile-game-stats">
+                        {gameStats.get(player.id) ||
+                          (gameStatsStatus === "loading" ? "Game stats loading..." : "")}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="col-teamName">
                     <PlayerTeamName player={player} />
@@ -1231,6 +1363,12 @@ function PlayerTableEnhanced({
                     {player.birthCity || "-"}
                     <span>{player.birthState || player.birthCountry || "-"}</span>
                   </td>
+                  {gameStats ? (
+                    <td className="col-gameStats">
+                      {gameStats.get(player.id) ||
+                        (gameStatsStatus === "loading" ? "Loading..." : "-")}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

@@ -87,6 +87,15 @@ test("condenses games into a responsive schedule board", async () => {
   assert.match(css, /\.game > span\.game-away,[\s\S]*?grid-column:\s*auto;/);
   assert.match(css, /\.game > span\.game-schedule\s*{\s*grid-column:\s*2 \/ span 2;/);
   assert.match(css, /\.game-status strong/);
+  assert.match(client, /window\.matchMedia\("\(max-width: 1179px\)"\)/);
+  assert.match(
+    css,
+    /@media \(min-width: 1180px\)\s*{[\s\S]*?\.games-grid\s*{[\s\S]*?grid-template-columns:\s*minmax\(400px, 0\.75fr\) minmax\(0, 1\.25fr\);/,
+  );
+  assert.match(css, /\.detail-panel\s*{[\s\S]*?position:\s*sticky;/);
+  assert.match(css, /\.games-grid \.game\s*{[\s\S]*?overflow:\s*hidden;/);
+  assert.match(css, /\.games-grid \.game > span\.game-action\s*{\s*display:\s*none;/);
+  assert.match(css, /\.games-grid \.category-row\s*{[\s\S]*?overflow-x:\s*auto;/);
 });
 
 test("collapses player tables into three concise mobile columns", async () => {
@@ -110,7 +119,7 @@ test("collapses player tables into three concise mobile columns", async () => {
   assert.match(css, /\.col-school\s*{\s*width:\s*36%;/);
 });
 
-test("preloads players from a scheduled daily snapshot without client warming", async () => {
+test("preloads verified players from scheduled daily snapshots without client warming", async () => {
   const [client, route, worker, vite, scheduler, schedulerConfig] = await Promise.all([
     readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
@@ -127,7 +136,7 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.match(route, /daily_team_snapshot/);
   assert.match(route, /withExplicitMissingValues/);
   assert.match(route, /hydrate=person\(draft,education\)/);
-  assert.doesNotMatch(route, /await enrichPlayers\(uniquePlayers/);
+  assert.match(route, /await enrichPlayers\(uniquePlayers, cache\)/);
   assert.match(route, /Snapshot validation failed because \$\{unresolvedPlayers\.length\} player records were not verified/);
   assert.match(route, /const PEOPLE_BATCH_SIZE = 200/);
   assert.match(route, /const PEOPLE_FETCH_CONCURRENCY = 2/);
@@ -136,11 +145,52 @@ test("preloads players from a scheduled daily snapshot without client warming", 
   assert.match(route, /Player normalization failed/);
   assert.doesNotMatch(route, /if \(view === "warm"\)/);
   assert.match(worker, /async scheduled\(/);
-  assert.match(vite, /crons:\s*\["0 10,14,18,22 \* \* \*"\]/);
+  assert.match(vite, /crons:\s*\["\*\/15 \* \* \* \*"\]/);
   assert.match(scheduler, /SITES_BYPASS_TOKEN/);
   assert.match(scheduler, /OAI-Sites-Authorization/);
   assert.match(scheduler, /x-gameday-cache-token/);
-  assert.match(schedulerConfig, /"crons":\s*\["0 10,14,18,22 \* \* \*"\]/);
+  assert.match(scheduler, /view=backfill&start=2026-08-01&end=2026-08-31/);
+  assert.match(worker, /view=backfill&start=2026-08-01&end=2026-08-31/);
+  assert.match(schedulerConfig, /"crons":\s*\["\*\/15 \* \* \* \*"\]/);
+});
+
+test("runs August backfills one verified date at a time and retains the month", async () => {
+  const [route, schema, migration] = await Promise.all([
+    readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0003_damp_thunderbird.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(route, /processNextBackfillDate/);
+  assert.match(route, /BACKFILL_MAX_ATTEMPTS = 4/);
+  assert.match(route, /status = 'processing'/);
+  assert.match(route, /status = 'complete'/);
+  assert.match(route, /SNAPSHOT_RETENTION_DAYS = 400/);
+  assert.match(route, /game\.status === "Final"/);
+  assert.match(schema, /backfillDayState/);
+  assert.match(migration, /backfill_day_state/);
+});
+
+test("adds concise non-zero box score data to final game roster rows", async () => {
+  const [client, route, schema, migration] = await Promise.all([
+    readFile(new URL("../app/GamedayApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/milb/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0002_careless_shen.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(client, /view=boxscore/);
+  assert.match(client, /Game stats/);
+  assert.match(client, /function gameStatsByPlayer/);
+  assert.match(client, /line\.homeRuns > 0/);
+  assert.match(client, /line\.inningsPitched !== "0\.0"/);
+  assert.match(client, /className="mobile-game-stats"/);
+  assert.doesNotMatch(client, /Final box score|Download CSV|function downloadBoxScoreCsv/);
+  assert.match(route, /\/game\/\$\{game\.gamePk\}\/boxscore/);
+  assert.match(route, /game_box_score_cache/);
+  assert.match(route, /Promise\.allSettled/);
+  assert.match(schema, /gameBoxScoreCache/);
+  assert.match(migration, /game_box_score_cache/);
 });
 
 test("loads prior-day player action with box-score stats and shared filters", async () => {
