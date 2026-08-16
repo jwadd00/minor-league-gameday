@@ -159,8 +159,12 @@ const ACTION_COLUMNS: Array<{
 const todayValue = () => new Date().toISOString().slice(0, 10);
 
 function previousDate(value: string) {
+  return shiftDate(value, -1);
+}
+
+function shiftDate(value: string, days: number) {
   const result = new Date(`${value}T12:00:00`);
-  result.setDate(result.getDate() - 1);
+  result.setDate(result.getDate() + days);
   return result.toISOString().slice(0, 10);
 }
 
@@ -283,6 +287,7 @@ export function GamedayApp() {
     "games",
   );
   const [date, setDate] = useState(todayValue);
+  const [actionDate, setActionDate] = useState(() => previousDate(todayValue()));
   const [games, setGames] = useState<ApiState<Game[]>>({ status: "idle" });
   const [selectedGamePk, setSelectedGamePk] = useState<number | null>(null);
   const [gameDetail, setGameDetail] = useState<ApiState<GameDetail>>({
@@ -332,8 +337,6 @@ export function GamedayApp() {
       cancelled = true;
     };
   }, [date]);
-
-  const actionDate = previousDate(date);
 
   useEffect(() => {
     if (activeTab !== "action") {
@@ -409,6 +412,24 @@ export function GamedayApp() {
   function showAction() {
     setActiveTab("action");
     scrollTo(actionRef);
+  }
+
+  const displayedDate = activeTab === "action" ? actionDate : date;
+
+  function moveDisplayedDate(days: number) {
+    if (activeTab === "action") {
+      setActionDate((current) => shiftDate(current, days));
+    } else {
+      setDate((current) => shiftDate(current, days));
+    }
+  }
+
+  function updateDisplayedDate(value: string) {
+    if (activeTab === "action") {
+      setActionDate(value);
+    } else {
+      setDate(value);
+    }
   }
 
   function selectGame(gamePk: number) {
@@ -505,38 +526,29 @@ export function GamedayApp() {
             position, draft slot, school, birthplace, and current MiLB card.
           </p>
         </div>
-        <div className="date-control" aria-label="Game date">
+        <div
+          className="date-control"
+          aria-label={activeTab === "action" ? "Action date" : "Game date"}
+        >
           <button
             type="button"
             aria-label="Previous day"
-            onClick={() =>
-              setDate((current) => {
-                const next = new Date(`${current}T12:00:00`);
-                next.setDate(next.getDate() - 1);
-                return next.toISOString().slice(0, 10);
-              })
-            }
+            onClick={() => moveDisplayedDate(-1)}
           >
             ‹
           </button>
           <label>
-            <span>Date</span>
+            <span>{activeTab === "action" ? "Action date" : "Date"}</span>
             <input
               type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
+              value={displayedDate}
+              onChange={(event) => updateDisplayedDate(event.target.value)}
             />
           </label>
           <button
             type="button"
             aria-label="Next day"
-            onClick={() =>
-              setDate((current) => {
-                const next = new Date(`${current}T12:00:00`);
-                next.setDate(next.getDate() + 1);
-                return next.toISOString().slice(0, 10);
-              })
-            }
+            onClick={() => moveDisplayedDate(1)}
           >
             ›
           </button>

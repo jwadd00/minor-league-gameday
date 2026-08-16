@@ -151,6 +151,15 @@ test("loads prior-day player action with box-score stats and shared filters", as
   ]);
 
   assert.match(client, /function previousDate\(value: string\)/);
+  assert.match(
+    client,
+    /const \[actionDate, setActionDate\] = useState\(\(\) => previousDate\(todayValue\(\)\)\)/,
+  );
+  assert.match(client, /const displayedDate = activeTab === "action" \? actionDate : date/);
+  assert.match(client, /onClick=\{\(\) => moveDisplayedDate\(-1\)\}/);
+  assert.match(client, /onClick=\{\(\) => moveDisplayedDate\(1\)\}/);
+  assert.match(client, /value=\{displayedDate\}/);
+  assert.match(client, /activeTab === "action" \? "Action date" : "Date"/);
   assert.match(client, /view=action&date=\$\{actionDate\}/);
   assert.match(client, /Yesterday&?apos;?s Action|Yesterday's Action/);
   assert.match(client, /\{ key: "stats", label: "Stats" \}/);
