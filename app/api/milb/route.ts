@@ -177,15 +177,11 @@ export async function GET(request: Request) {
 
     if (view === "action") {
       const snapshot = await readDailySnapshot(date, cache);
-      if (!snapshot) {
-        return snapshotUnavailable(date);
-      }
-
       const players = await getActionPlayers(date, snapshot, cache);
       return snapshotJson({
         players,
         gameCount: new Set(players.map((player) => player.gamePk)).size,
-        snapshot: snapshot.state,
+        snapshot: snapshot?.state ?? null,
       });
     }
 
@@ -487,20 +483,22 @@ async function getGames(
 
 async function getActionPlayers(
   date: string,
-  snapshot: DailySnapshot,
+  snapshot: DailySnapshot | null,
   cache: CacheStore,
 ): Promise<ActionPlayer[]> {
   const games = (await getGames(date, cache)).filter(
     (game) => !/scheduled|preview|postponed|cancelled/i.test(game.status),
   );
   const snapshotByPlayer = new Map<string, Player>();
-  for (const player of snapshot.players) {
+  for (const player of snapshot?.players ?? []) {
     snapshotByPlayer.set(`${player.teamId}:${player.id}`, player);
     snapshotByPlayer.set(`player:${player.id}`, player);
   }
 
   const gamePlayers = await mapLimit(games, 8, async (game) => {
-    const boxscore = await statsApi(`/game/${game.gamePk}/boxscore`);
+    const boxscore = await statsApi(
+      `/game/${game.gamePk}/boxscore?hydrate=person(draft,education)`,
+    );
     const teams = objectOf(boxscore.teams);
 
     return ([
@@ -546,6 +544,8 @@ function normalizeActionPlayer(
   const snapshotPlayer =
     snapshotByPlayer.get(`${team.id}:${id}`) ??
     snapshotByPlayer.get(`player:${id}`);
+  const education = extractEducation(person);
+  const draft = extractDraft(person);
   const fallback: Player = {
     id,
     name,
@@ -554,12 +554,12 @@ function normalizeActionPlayer(
     position: stringOf(objectOf(entry.position).abbreviation),
     number: stringOf(entry.jerseyNumber),
     status: stringOf(objectOf(entry.status).description),
-    draft: "Not listed by MiLB",
-    school: "Not listed by MiLB",
-    schoolType: "Not listed",
-    birthCity: "Not listed",
-    birthState: "",
-    birthCountry: "Not listed",
+    draft: draft || "Not listed by MiLB",
+    school: education.school || "Not listed by MiLB",
+    schoolType: education.schoolType || "Not listed",
+    birthCity: stringOf(person.birthCity) || "Not listed",
+    birthState: stringOf(person.birthStateProvince),
+    birthCountry: stringOf(person.birthCountry) || "Not listed",
     milbUrl: `https://www.milb.com/player/${id}`,
   };
 

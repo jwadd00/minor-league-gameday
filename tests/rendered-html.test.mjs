@@ -158,7 +158,15 @@ test("loads prior-day player action with box-score stats and shared filters", as
   assert.match(client, /<strong>BAT<\/strong>/);
   assert.match(client, /<strong>PITCH<\/strong>/);
   assert.match(route, /if \(view === "action"\)/);
-  assert.match(route, /`\/game\/\$\{game\.gamePk\}\/boxscore`/);
+  assert.match(
+    route,
+    /`\/game\/\$\{game\.gamePk\}\/boxscore\?hydrate=person\(draft,education\)`/,
+  );
+  assert.match(route, /snapshot: snapshot\?\.state \?\? null/);
+  assert.doesNotMatch(
+    route,
+    /if \(view === "action"\)[\s\S]*?return snapshotUnavailable\(date\)/,
+  );
   assert.match(route, /normalizeGameStats/);
   assert.match(css, /\.col-stats/);
   assert.match(css, /\.game-stat-lines/);
